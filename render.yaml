@@ -1,0 +1,65 @@
+services:
+  - type: pserv
+    runtime: docker
+    name: quant-stress-compute
+    plan: starter
+    region: oregon
+    dockerfilePath: ./compute-engine/Dockerfile
+    dockerContext: ./compute-engine
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8000"
+    buildFilter:
+      paths:
+        - compute-engine/**
+
+  - type: pserv
+    runtime: docker
+    name: quant-stress-gateway
+    plan: starter
+    region: oregon
+    dockerfilePath: ./api-gateway/Dockerfile
+    dockerContext: ./api-gateway
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: MARKET_DATA_BASE_URL
+        value: https://query1.finance.yahoo.com
+      - key: MARKET_DATA_RANGE
+        value: 3y
+      - key: MARKET_DATA_CACHE_TTL
+        value: 6h
+      - key: COMPUTE_ENGINE_URL
+        fromService:
+          type: pserv
+          name: quant-stress-compute
+          property: hostport
+    buildFilter:
+      paths:
+        - api-gateway/**
+
+  - type: web
+    runtime: docker
+    name: quant-stress-ui
+    plan: starter
+    region: oregon
+    dockerfilePath: ./edge-ui/Dockerfile
+    dockerContext: ./edge-ui
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: "3000"
+      - key: API_GATEWAY_INTERNAL_URL
+        fromService:
+          type: pserv
+          name: quant-stress-gateway
+          property: hostport
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        sync: false
+    buildFilter:
+      paths:
+        - edge-ui/**

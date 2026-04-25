@@ -1,0 +1,35 @@
+services:
+  compute-engine:
+    build:
+      context: ./compute-engine
+    environment:
+      PORT: 8000
+    ports:
+      - "8000:8000"
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+    environment:
+      COMPUTE_ENGINE_URL: http://compute-engine:8000
+      MARKET_DATA_BASE_URL: https://query1.finance.yahoo.com
+      MARKET_DATA_RANGE: 3y
+      MARKET_DATA_CACHE_TTL: 6h
+      PORT: 8080
+    depends_on:
+      - compute-engine
+    ports:
+      - "8080:8080"
+
+  edge-ui:
+    build:
+      context: ./edge-ui
+    environment:
+      PORT: 3000
+      API_GATEWAY_INTERNAL_URL: http://api-gateway:8080
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-}
+    depends_on:
+      - api-gateway
+    ports:
+      - "3000:3000"
