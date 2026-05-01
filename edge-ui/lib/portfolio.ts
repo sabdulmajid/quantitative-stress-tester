@@ -100,7 +100,7 @@ export function addTickerToSelections(
     return selections;
   }
 
-  const nextTickers = [...selections.map((item) => item.ticker), ticker].slice(0, 5);
+  const nextTickers = [...selections.map((item) => item.ticker), ticker].slice(0, 20);
   return evenlySplitSelections(nextTickers);
 }
 

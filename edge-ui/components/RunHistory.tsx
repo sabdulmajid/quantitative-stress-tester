@@ -57,7 +57,10 @@ export default function RunHistory({
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <div className="text-sm font-semibold text-slate-950">{run.tickers.join(" / ")}</div>
-                  <div className="mt-1 text-xs text-slate-500">{formatTimestamp(run.created_at)}</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {formatTimestamp(run.created_at)} / {Math.round(run.confidence_level * 100)}% /{" "}
+                    {run.horizon_days === 252 ? "1Y" : `${run.horizon_days}D`}
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -68,14 +71,18 @@ export default function RunHistory({
                 </button>
               </div>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="rounded-2xl bg-white p-3">
                   <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Expected</div>
                   <div className="mt-1 text-lg font-semibold text-slate-950">{formatPercent(run.expected_return)}</div>
                 </div>
                 <div className="rounded-2xl bg-white p-3">
-                  <div className="text-xs uppercase tracking-[0.2em] text-slate-400">VaR 95%</div>
-                  <div className="mt-1 text-lg font-semibold text-rose-600">{formatPercent(run.var_95)}</div>
+                  <div className="text-xs uppercase tracking-[0.2em] text-slate-400">VaR</div>
+                  <div className="mt-1 text-lg font-semibold text-rose-600">{formatPercent(run.value_at_risk)}</div>
+                </div>
+                <div className="rounded-2xl bg-white p-3">
+                  <div className="text-xs uppercase tracking-[0.2em] text-slate-400">CVaR</div>
+                  <div className="mt-1 text-lg font-semibold text-rose-600">{formatPercent(run.cvar)}</div>
                 </div>
                 <div className="rounded-2xl bg-white p-3">
                   <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Latency</div>

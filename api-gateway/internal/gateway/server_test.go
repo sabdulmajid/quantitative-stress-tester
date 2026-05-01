@@ -39,8 +39,8 @@ func (s stubMarketDataProvider) CacheTTL() time.Duration {
 	return 6 * time.Hour
 }
 
-func (s stubMarketDataProvider) PortfolioInputs(_ context.Context, _ []string) ([]float64, [][]float64, error) {
-	return s.mu, s.cov, s.err
+func (s stubMarketDataProvider) PortfolioInputs(_ context.Context, _ []string) (marketInputs, error) {
+	return marketInputs{Mu: s.mu, Covariance: s.cov}, s.err
 }
 
 func TestStressTestValidationRejectsBadRequests(t *testing.T) {
@@ -84,8 +84,8 @@ func TestStressTestValidationRejectsBadRequests(t *testing.T) {
 		{
 			name: "too many tickers",
 			req: stressTestRequest{
-				Tickers: []string{"AAPL", "MSFT", "TSLA", "SPY", "GLD", "AAPL"},
-				Weights: []float64{1, 1, 1, 1, 1, 1},
+				Tickers: []string{"T00", "T01", "T02", "T03", "T04", "T05", "T06", "T07", "T08", "T09", "T10", "T11", "T12", "T13", "T14", "T15", "T16", "T17", "T18", "T19", "T20"},
+				Weights: []float64{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
 			},
 		},
 		{
@@ -133,6 +133,12 @@ func TestStressTestForwardsNormalizedPayload(t *testing.T) {
 		if payload.HorizonDays != defaultHorizonDays {
 			t.Fatalf("unexpected horizon_days: %d", payload.HorizonDays)
 		}
+		if payload.ConfidenceLevel != defaultConfidence {
+			t.Fatalf("unexpected confidence_level: %v", payload.ConfidenceLevel)
+		}
+		if payload.RiskFreeRate != defaultRiskFreeRate {
+			t.Fatalf("unexpected risk_free_rate: %v", payload.RiskFreeRate)
+		}
 		if payload.Seed != defaultSeed {
 			t.Fatalf("unexpected seed: %d", payload.Seed)
 		}
@@ -167,8 +173,8 @@ func TestStressTestForwardsNormalizedPayload(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_, _ = w.Write([]byte(`{"var_95":0.12,"expected_return":0.14,"histogram":[],"elapsed_ms":7}`))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"var_95":0.12,"var_99":0.2,"value_at_risk":0.12,"cvar":0.15,"annualized_volatility":0.22,"sharpe_ratio":0.54,"confidence_level":0.95,"expected_return":0.14,"histogram":[],"elapsed_ms":7}`))
 	}))
 	defer upstream.Close()
 
@@ -194,14 +200,47 @@ func TestStressTestForwardsNormalizedPayload(t *testing.T) {
 
 	srv.Routes().ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusAccepted {
+	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d", rr.Code)
 	}
 	if got := rr.Header().Get("Content-Type"); got != "application/json" {
 		t.Fatalf("unexpected content type: %s", got)
 	}
-	if got := rr.Body.String(); got != `{"var_95":0.12,"expected_return":0.14,"histogram":[],"elapsed_ms":7}` {
-		t.Fatalf("unexpected body: %s", got)
+
+	var respBody map[string]interface{}
+	if err := json.NewDecoder(rr.Body).Decode(&respBody); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if respBody["provider"] != "Test Provider" {
+		t.Fatalf("unexpected provider: %v", respBody["provider"])
+	}
+	if respBody["range"] != "3y" {
+		t.Fatalf("unexpected range: %v", respBody["range"])
+	}
+	if respBody["elapsed_ms"] != float64(7) {
+		t.Fatalf("unexpected elapsed_ms: %v", respBody["elapsed_ms"])
+	}
+	if respBody["data_fetch_ms"] == nil {
+		t.Fatalf("missing data_fetch_ms")
+	}
+	if respBody["total_roundtrip_ms"] == nil {
+		t.Fatalf("missing total_roundtrip_ms")
+	}
+	if got := respBody["value_at_risk"]; got != float64(0.12) {
+		t.Fatalf("unexpected value_at_risk: %v", got)
+	}
+	if got := respBody["cvar"]; got != float64(0.15) {
+		t.Fatalf("unexpected cvar: %v", got)
+	}
+	if got := respBody["annualized_volatility"]; got != float64(0.22) {
+		t.Fatalf("unexpected annualized_volatility: %v", got)
+	}
+	if got := respBody["sharpe_ratio"]; got != float64(0.54) {
+		t.Fatalf("unexpected sharpe_ratio: %v", got)
+	}
+	correlation, ok := respBody["correlation_matrix"].([]interface{})
+	if !ok || len(correlation) != 2 {
+		t.Fatalf("unexpected correlation matrix: %#v", respBody["correlation_matrix"])
 	}
 }
 
@@ -257,7 +296,7 @@ func TestSupportedTickers(t *testing.T) {
 	if body.Range != "3y" {
 		t.Fatalf("unexpected range: %s", body.Range)
 	}
-	if body.MaxPortfolioTickers != 5 {
+	if body.MaxPortfolioTickers != maxPortfolioTickers {
 		t.Fatalf("unexpected max tickers: %d", body.MaxPortfolioTickers)
 	}
 	if body.PaddedAssetCount != paddedSize {

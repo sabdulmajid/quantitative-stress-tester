@@ -24,12 +24,16 @@ function formatDisplayValue(value: number) {
 
 export default function DistributionChart({
   histogram,
-  var95
+  valueAtRisk,
+  confidenceLevel,
+  loading
 }: {
   histogram: HistogramBin[];
-  var95: number;
+  valueAtRisk: number;
+  confidenceLevel: number;
+  loading: boolean;
 }) {
-  const tailThreshold = -Math.abs(var95);
+  const tailThreshold = -Math.abs(valueAtRisk);
   const bars = histogram.map((bin) => {
     const isTail =
       bin.bin_end <= tailThreshold || (bin.bin_start <= tailThreshold && tailThreshold < bin.bin_end);
@@ -47,60 +51,74 @@ export default function DistributionChart({
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-teal-300/70">Distribution</p>
           <h2 className="mt-2 text-2xl font-semibold tracking-tight">Simulation histogram</h2>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-300">
-            50 bins from the backend. The bottom tail is highlighted red at the reported 95% VaR threshold.
+            50 bins from the backend. The selected loss tail is highlighted red.
           </p>
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-          <div className="text-xs uppercase tracking-[0.24em] text-slate-400">VaR 95%</div>
-          <div className="mt-1 text-lg font-semibold text-rose-300">{formatDisplayValue(var95)}</div>
+          <div className="text-xs uppercase tracking-[0.24em] text-slate-400">VaR {Math.round(confidenceLevel * 100)}%</div>
+          <div className="mt-1 text-lg font-semibold text-rose-300">{formatDisplayValue(valueAtRisk)}</div>
         </div>
       </div>
 
       <div className="mt-6 h-[360px]">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={bars} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
-            <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
-            <XAxis
-              dataKey="bin_start"
-              tickFormatter={(value) => formatDisplayValue(Number(value))}
-              stroke="rgba(226,232,240,0.55)"
-              tickLine={false}
-              axisLine={{ stroke: "rgba(226,232,240,0.18)" }}
-              minTickGap={22}
-            />
-            <YAxis
-              stroke="rgba(226,232,240,0.55)"
-              tickLine={false}
-              axisLine={{ stroke: "rgba(226,232,240,0.18)" }}
-              allowDecimals={false}
-            />
-            <Tooltip
-              cursor={{ fill: "rgba(255,255,255,0.06)" }}
-              contentStyle={{
-                borderRadius: 16,
-                border: "1px solid rgba(148, 163, 184, 0.18)",
-                background: "rgba(15, 23, 42, 0.96)",
-                color: "#fff"
-              }}
-              labelStyle={{ color: "#cbd5e1" }}
-              formatter={((value) => [new Intl.NumberFormat("en-US").format(Number(value ?? 0)), "Frequency"]) as (
-                value: unknown
-              ) => [string, string]}
-              labelFormatter={(_, payload) => {
-                const row = payload?.[0]?.payload as { label?: string } | undefined;
-                return row?.label ?? "";
-              }}
-            />
-            <Bar dataKey="frequency" radius={[10, 10, 0, 0]} barSize={12}>
-              {bars.map((entry) => (
-                <Cell
-                  key={`${entry.bin_start}-${entry.bin_end}`}
-                  fill={entry.isTail ? "#ef4444" : "#38bdf8"}
+        {loading ? (
+          <div className="flex h-full flex-col justify-end gap-2 rounded-2xl bg-white/5 p-4">
+            <div className="h-2 overflow-hidden rounded-full bg-white/10">
+              <div className="simulation-progress h-full rounded-full bg-teal-300" />
+            </div>
+            <div className="grid h-64 grid-cols-12 items-end gap-2">
+              {Array.from({ length: 48 }, (_, index) => (
+                <div
+                  key={index}
+                  className="animate-pulse rounded-t-md bg-white/10"
+                  style={{ height: `${18 + ((index * 17) % 74)}%` }}
                 />
               ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+            </div>
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={bars} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
+              <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
+              <XAxis
+                dataKey="bin_start"
+                tickFormatter={(value) => formatDisplayValue(Number(value))}
+                stroke="rgba(226,232,240,0.55)"
+                tickLine={false}
+                axisLine={{ stroke: "rgba(226,232,240,0.18)" }}
+                minTickGap={22}
+              />
+              <YAxis
+                stroke="rgba(226,232,240,0.55)"
+                tickLine={false}
+                axisLine={{ stroke: "rgba(226,232,240,0.18)" }}
+                allowDecimals={false}
+              />
+              <Tooltip
+                cursor={{ fill: "rgba(255,255,255,0.06)" }}
+                contentStyle={{
+                  borderRadius: 16,
+                  border: "1px solid rgba(148, 163, 184, 0.18)",
+                  background: "rgba(15, 23, 42, 0.96)",
+                  color: "#fff"
+                }}
+                labelStyle={{ color: "#cbd5e1" }}
+                formatter={((value) => [new Intl.NumberFormat("en-US").format(Number(value ?? 0)), "Frequency"]) as (
+                  value: unknown
+                ) => [string, string]}
+                labelFormatter={(_, payload) => {
+                  const row = payload?.[0]?.payload as { label?: string } | undefined;
+                  return row?.label ?? "";
+                }}
+              />
+              <Bar dataKey="frequency" radius={[10, 10, 0, 0]} barSize={12}>
+                {bars.map((entry) => (
+                  <Cell key={`${entry.bin_start}-${entry.bin_end}`} fill={entry.isTail ? "#ef4444" : "#38bdf8"} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </section>
   );

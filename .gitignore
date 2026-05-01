@@ -2,6 +2,7 @@
 .env
 .env.local
 .next/
+*.tsbuildinfo
 .pytest_cache/
 .ruff_cache/
 __pycache__/

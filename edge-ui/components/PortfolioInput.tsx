@@ -76,10 +76,12 @@ function TickerWeightSlider({
 
 export default function PortfolioInput({
   supportedTickers,
-  loadingTickers
+  loadingTickers,
+  maxPortfolioTickers
 }: {
   supportedTickers: SupportedTicker[];
   loadingTickers: boolean;
+  maxPortfolioTickers: number;
 }) {
   const selections = usePortfolioStore((state) => state.selections);
   const addTicker = usePortfolioStore((state) => state.addTicker);
@@ -101,14 +103,15 @@ export default function PortfolioInput({
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-teal-800/70">Portfolio</p>
           <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Configure tickers and weights</h2>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
-            Add up to five supported tickers, then tune allocations with debounced sliders. The backend receives the
-            current ticker list and normalized weights derived from live market metadata.
+            Add up to {maxPortfolioTickers} supported tickers, then tune allocations with debounced sliders.
           </p>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-slate-950 px-4 py-3 text-slate-100">
           <div className="text-xs uppercase tracking-[0.24em] text-slate-400">Selections</div>
-          <div className="mt-1 text-lg font-semibold">{selections.length}/5</div>
+          <div className="mt-1 text-lg font-semibold">
+            {selections.length}/{maxPortfolioTickers}
+          </div>
         </div>
       </div>
 
@@ -155,7 +158,7 @@ export default function PortfolioInput({
         </button>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
         {selections.map((selection) => (
           <TickerWeightSlider
             key={`${selection.ticker}-${selection.weight.toFixed(2)}`}

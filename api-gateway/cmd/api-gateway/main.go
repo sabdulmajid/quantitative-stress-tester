@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -16,14 +16,19 @@ import (
 
 func main() {
 	cfg := config.Load()
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	srv := gateway.New(gateway.Config{
 		ComputeEngineURL:   cfg.ComputeEngineURL,
 		HTTPClient:         newHTTPClient(cfg.RequestTimeout),
-		Logger:             log.New(os.Stdout, "", log.LstdFlags|log.LUTC),
+		Logger:             logger,
 		MarketDataBaseURL:  cfg.MarketDataBaseURL,
 		MarketDataRange:    cfg.MarketDataRange,
 		MarketDataCacheTTL: cfg.MarketDataCacheTTL,
+		RedisURL:           cfg.RedisURL,
+		MarketFetchWorkers: cfg.MarketFetchWorkers,
+		MarketFetchMinWait: cfg.MarketFetchMinWait,
+		MarketFetchMaxWait: cfg.MarketFetchMaxWait,
 	})
 
 	httpServer := &http.Server{
@@ -43,7 +48,7 @@ func main() {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("api-gateway listening on %s", cfg.ListenAddr)
+		logger.Info("api-gateway listening", slog.String("listen_addr", cfg.ListenAddr))
 		errCh <- httpServer.ListenAndServe()
 	}()
 
@@ -52,11 +57,13 @@ func main() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
-			log.Fatalf("graceful shutdown failed: %v", err)
+			logger.Error("graceful shutdown failed", slog.String("error", err.Error()))
+			os.Exit(1)
 		}
 	case err := <-errCh:
 		if err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server failed: %v", err)
+			logger.Error("server failed", slog.String("error", err.Error()))
+			os.Exit(1)
 		}
 	}
 }

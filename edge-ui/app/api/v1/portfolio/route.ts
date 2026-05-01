@@ -5,8 +5,8 @@ import type { SavePortfolioRequest } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const context = await getAuthenticatedSupabaseContext();
+export async function GET(request: NextRequest) {
+  const context = await getAuthenticatedSupabaseContext(request.headers.get("authorization"));
 
   if (!context.enabled) {
     return NextResponse.json({ error: "Supabase persistence is not configured" }, { status: 503 });
@@ -32,7 +32,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const context = await getAuthenticatedSupabaseContext();
+  const context = await getAuthenticatedSupabaseContext(request.headers.get("authorization"));
 
   if (!context.enabled) {
     return NextResponse.json({ error: "Supabase persistence is not configured" }, { status: 503 });

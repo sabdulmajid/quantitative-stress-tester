@@ -17,6 +17,8 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { roundWeight } from "@/lib/portfolio";
 import type {
   AppUser,
+  ConfidenceLevel,
+  HorizonDays,
   SavedPortfolio,
   StressRunRecord,
   StressTestResponse,
@@ -28,7 +30,13 @@ const DistributionChart = dynamic(() => import("@/components/DistributionChart")
   ssr: false
 });
 
+const CorrelationMatrix = dynamic(() => import("@/components/CorrelationMatrix"), {
+  ssr: false
+});
+
 const persistenceEnabled = isSupabaseConfigured();
+const horizonOptions: HorizonDays[] = [1, 10, 252];
+const confidenceOptions: ConfidenceLevel[] = [0.95, 0.99];
 
 function formatElapsed(value: number | undefined) {
   if (typeof value !== "number" || Number.isNaN(value)) return "—";
@@ -43,6 +51,11 @@ function formatGenericValue(value: number | undefined) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 2
   }).format(value);
+}
+
+function formatRatio(value: number | undefined) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "—";
+  return value.toFixed(2);
 }
 
 function formatTimestamp(value: string | undefined) {
@@ -64,6 +77,9 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<StressTestResponse | null>(null);
   const [clientElapsedMs, setClientElapsedMs] = useState<number | null>(null);
+  const [confidenceLevel, setConfidenceLevel] = useState<ConfidenceLevel>(0.95);
+  const [horizonDays, setHorizonDays] = useState<HorizonDays>(252);
+  const [riskFreeRate, setRiskFreeRate] = useState(0.02);
   const [tickerUniverse, setTickerUniverse] = useState<TickerUniverseResponse | null>(null);
   const [tickerUniverseError, setTickerUniverseError] = useState<string | null>(null);
   const [loadingTickers, setLoadingTickers] = useState(true);
@@ -75,6 +91,8 @@ export default function Page() {
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
   const [runHistory, setRunHistory] = useState<StressRunRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -103,7 +121,11 @@ export default function Page() {
     return () => {
       active = false;
     };
-  }, [syncSupportedTickers]);
+  }, [syncSupportedTickers, retryCount]);
+
+  async function handleRetryTickers() {
+    setRetryCount((c) => c + 1);
+  }
 
   async function syncAuthState(supabase = createBrowserSupabaseClient()) {
     const {
@@ -199,9 +221,12 @@ export default function Page() {
   const payload = useMemo(
     () => ({
       tickers: selections.map((selection) => selection.ticker),
-      weights: selections.map((selection) => roundWeight(selection.weight))
+      weights: selections.map((selection) => roundWeight(selection.weight)),
+      horizon_days: horizonDays,
+      confidence_level: confidenceLevel,
+      risk_free_rate: riskFreeRate
     }),
-    [selections]
+    [confidenceLevel, horizonDays, riskFreeRate, selections]
   );
 
   async function handleRun() {
@@ -252,6 +277,9 @@ export default function Page() {
         weight: run.weights[index] ?? 0
       }))
     );
+    setHorizonDays(run.horizon_days);
+    setConfidenceLevel(run.confidence_level);
+    setRiskFreeRate(run.risk_free_rate);
     setPortfolioMessage("Portfolio loaded from run history.");
     setPortfolioError(null);
   }
@@ -259,6 +287,7 @@ export default function Page() {
   const totalWeight = selections.reduce((sum, item) => sum + item.weight, 0);
   const ready = selections.length > 0 && !loadingTickers && !tickerUniverseError;
   const liveTickerCount = tickerUniverse?.tickers.length ?? 0;
+  const maxPortfolioTickers = tickerUniverse?.max_portfolio_tickers ?? 20;
   const cacheMinutes =
     typeof tickerUniverse?.cache_ttl_seconds === "number"
       ? Math.round(tickerUniverse.cache_ttl_seconds / 60)
@@ -334,7 +363,11 @@ export default function Page() {
               onAuthChange={handleAuthChange}
             />
 
-            <PortfolioInput supportedTickers={tickerUniverse?.tickers ?? []} loadingTickers={loadingTickers} />
+            <PortfolioInput
+              supportedTickers={tickerUniverse?.tickers ?? []}
+              loadingTickers={loadingTickers}
+              maxPortfolioTickers={maxPortfolioTickers}
+            />
 
             <section className="rounded-[2rem] border border-slate-200/80 bg-white/78 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -365,9 +398,87 @@ export default function Page() {
                 </div>
               </div>
 
+              <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_1fr_0.9fr]">
+                <div className="rounded-2xl border border-slate-200 bg-white/85 p-4">
+                  <div className="text-sm font-medium text-slate-700">Confidence</div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
+                    {confidenceOptions.map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setConfidenceLevel(option)}
+                        className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                          confidenceLevel === option ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-white"
+                        }`}
+                      >
+                        {Math.round(option * 100)}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white/85 p-4">
+                  <div className="text-sm font-medium text-slate-700">Horizon</div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl bg-slate-100 p-1">
+                    {horizonOptions.map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setHorizonDays(option)}
+                        className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                          horizonDays === option ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-white"
+                        }`}
+                      >
+                        {option === 252 ? "1Y" : `${option}D`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <label className="rounded-2xl border border-slate-200 bg-white/85 p-4">
+                  <span className="text-sm font-medium text-slate-700">Risk-free rate</span>
+                  <div className="mt-3 flex items-center gap-2">
+                    <input
+                      className="field"
+                      type="number"
+                      min={-10}
+                      max={25}
+                      step={0.25}
+                      value={(riskFreeRate * 100).toFixed(2)}
+                      onChange={(event) => {
+                        const nextRate = Number(event.target.value);
+                        if (Number.isFinite(nextRate)) {
+                          setRiskFreeRate(nextRate / 100);
+                        }
+                      }}
+                    />
+                    <span className="text-sm font-semibold text-slate-500">%</span>
+                  </div>
+                </label>
+              </div>
+
+              {loading ? (
+                <div className="mt-5 rounded-2xl border border-teal-200 bg-teal-50 p-4">
+                  <div className="flex items-center justify-between gap-4 text-sm font-medium text-teal-900">
+                    <span>Simulating 100,000 paths</span>
+                    <span>{Math.round(confidenceLevel * 100)}% VaR</span>
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-teal-100">
+                    <div className="simulation-progress h-full rounded-full bg-teal-700" />
+                  </div>
+                </div>
+              ) : null}
+
               {tickerUniverseError ? (
-                <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                  {tickerUniverseError}
+                <div className="mt-5 flex items-center justify-between rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                  <span>{tickerUniverseError}</span>
+                  <button
+                    type="button"
+                    onClick={handleRetryTickers}
+                    className="ml-4 rounded-full bg-amber-200 px-3 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-300"
+                  >
+                    Retry
+                  </button>
                 </div>
               ) : null}
 
@@ -389,11 +500,16 @@ export default function Page() {
                 </div>
               ) : null}
 
-              <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {[
                   ["Expected return", formatGenericValue(result?.expected_return)],
-                  ["95% VaR", formatGenericValue(result?.var_95)],
-                  ["Elapsed", formatElapsed(result?.elapsed_ms)],
+                  [`VaR ${Math.round(confidenceLevel * 100)}%`, formatGenericValue(result?.value_at_risk)],
+                  ["CVaR", formatGenericValue(result?.cvar)],
+                  ["Annualized vol", formatGenericValue(result?.annualized_volatility)],
+                  ["Sharpe", formatRatio(result?.sharpe_ratio)],
+                  ["Compute", formatElapsed(result?.elapsed_ms)],
+                  ["Data fetch", formatElapsed(result?.data_fetch_ms)],
+                  ["Gateway round-trip", formatElapsed(result?.total_roundtrip_ms)],
                   ["Client round-trip", formatElapsed(clientElapsedMs ?? undefined)]
                 ].map(([label, value]) => (
                   <div key={label} className="rounded-2xl border border-slate-200 bg-white/85 p-4">
@@ -413,7 +529,18 @@ export default function Page() {
           </div>
 
           <div className="space-y-6">
-            <DistributionChart histogram={result?.histogram ?? []} var95={result?.var_95 ?? 0} />
+            <DistributionChart
+              histogram={result?.histogram ?? []}
+              valueAtRisk={result?.value_at_risk ?? 0}
+              confidenceLevel={confidenceLevel}
+              loading={loading}
+            />
+
+            <CorrelationMatrix
+              tickers={result?.tickers ?? []}
+              correlationMatrix={result?.correlation_matrix ?? []}
+              covarianceMatrix={result?.covariance_matrix ?? []}
+            />
 
             <RunHistory
               runs={runHistory}
@@ -423,10 +550,10 @@ export default function Page() {
             />
 
             <section className="rounded-[2rem] border border-slate-200/80 bg-white/78 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur">
-              <h2 className="text-2xl font-semibold tracking-tight text-slate-950">What this app expects</h2>
+              <h2 className="text-2xl font-semibold tracking-tight text-slate-950">Response contract</h2>
               <p className="mt-1 text-sm leading-6 text-slate-600">
-                The backend returns `var_95`, `expected_return`, `histogram`, and `elapsed_ms`. The chart colors every
-                bin that falls at or below the VaR threshold in red.
+                The gateway returns VaR, CVaR, annualized volatility, Sharpe, timing telemetry, covariance, and
+                correlation data for the selected portfolio.
               </p>
               <p className="mt-3 text-sm leading-6 text-slate-600">
                 When Supabase is configured, the app uses cookie-backed sessions for auth and stores one saved portfolio

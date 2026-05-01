@@ -69,3 +69,19 @@ pre {
   box-shadow: 0 24px 80px rgba(15, 23, 42, 0.24);
 }
 
+.simulation-progress {
+  animation: simulation-progress 1.15s ease-in-out infinite;
+  transform-origin: left center;
+}
+
+@keyframes simulation-progress {
+  0% {
+    transform: translateX(-20%) scaleX(0.22);
+  }
+  50% {
+    transform: translateX(35%) scaleX(0.62);
+  }
+  100% {
+    transform: translateX(120%) scaleX(0.22);
+  }
+}

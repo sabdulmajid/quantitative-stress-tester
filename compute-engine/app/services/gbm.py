@@ -49,12 +49,25 @@ def simulate_portfolio_gbm(
     )(random_draws, padded_weights, padded_mu, cholesky, variances, horizon_years)
 
 
-def summarize_portfolio_returns(portfolio_returns: jax.Array) -> tuple[float, float, list[dict[str, float | int]]]:
+def summarize_portfolio_returns(
+    portfolio_returns: jax.Array,
+    confidence_level: float = 0.95,
+) -> tuple[float, float, float, float, float, list[dict[str, float | int]]]:
     returns = jax.device_get(portfolio_returns)
     import numpy as np
 
     expected_return = float(np.mean(returns))
-    var_cutoff = float(np.percentile(returns, 5))
+    var_95_cutoff = float(np.percentile(returns, 5))
+    var_99_cutoff = float(np.percentile(returns, 1))
+    selected_percentile = (1.0 - confidence_level) * 100.0
+    selected_cutoff = float(np.percentile(returns, selected_percentile))
+    tail_returns = returns[returns <= selected_cutoff]
+
+    var_95 = max(0.0, float(-var_95_cutoff))
+    var_99 = max(0.0, float(-var_99_cutoff))
+    value_at_risk = max(0.0, float(-selected_cutoff))
+    cvar = max(0.0, float(-np.mean(tail_returns))) if tail_returns.size > 0 else value_at_risk
+
     frequencies, edges = np.histogram(returns, bins=HISTOGRAM_BINS)
 
     histogram = [
@@ -65,7 +78,28 @@ def summarize_portfolio_returns(portfolio_returns: jax.Array) -> tuple[float, fl
         }
         for index in range(HISTOGRAM_BINS)
     ]
-    return expected_return, float(-var_cutoff), histogram
+    return expected_return, var_95, var_99, value_at_risk, cvar, histogram
+
+
+def compute_portfolio_risk_metrics(
+    padded_weights: jax.Array,
+    padded_mu: jax.Array,
+    padded_cov: jax.Array,
+    risk_free_rate: float,
+) -> tuple[float, float]:
+    import numpy as np
+
+    weights = np.asarray(jax.device_get(padded_weights), dtype=np.float64)
+    mu = np.asarray(jax.device_get(padded_mu), dtype=np.float64)
+    covariance = np.asarray(jax.device_get(padded_cov), dtype=np.float64)
+
+    variance = float(weights @ covariance @ weights)
+    annualized_volatility = float(np.sqrt(max(variance, 0.0)))
+    annualized_return = float(weights @ mu)
+    if annualized_volatility <= 1e-12:
+        return annualized_volatility, 0.0
+
+    return annualized_volatility, float((annualized_return - risk_free_rate) / annualized_volatility)
 
 
 def prewarm_gbm_engine() -> None:

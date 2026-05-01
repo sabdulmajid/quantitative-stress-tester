@@ -3,6 +3,7 @@ package config
 import (
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -14,6 +15,10 @@ type Config struct {
 	MarketDataBaseURL  string
 	MarketDataRange    string
 	MarketDataCacheTTL time.Duration
+	RedisURL           string
+	MarketFetchWorkers int
+	MarketFetchMinWait time.Duration
+	MarketFetchMaxWait time.Duration
 }
 
 func Load() Config {
@@ -24,6 +29,10 @@ func Load() Config {
 		MarketDataBaseURL:  getenv("MARKET_DATA_BASE_URL", "https://query1.finance.yahoo.com"),
 		MarketDataRange:    getenv("MARKET_DATA_RANGE", "3y"),
 		MarketDataCacheTTL: mustDuration(getenv("MARKET_DATA_CACHE_TTL", "6h"), 6*time.Hour),
+		RedisURL:           os.Getenv("REDIS_URL"),
+		MarketFetchWorkers: mustInt(getenv("MARKET_DATA_FETCH_WORKERS", "2"), 2),
+		MarketFetchMinWait: mustDuration(getenv("MARKET_DATA_FETCH_MIN_WAIT", "120ms"), 120*time.Millisecond),
+		MarketFetchMaxWait: mustDuration(getenv("MARKET_DATA_FETCH_MAX_WAIT", "320ms"), 320*time.Millisecond),
 	}
 }
 
@@ -64,4 +73,12 @@ func mustDuration(raw string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+func mustInt(raw string, fallback int) int {
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
 }

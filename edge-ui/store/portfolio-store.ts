@@ -50,7 +50,7 @@ function keepSupportedSelections(
     return fallbackSelections(supportedTickers);
   }
 
-  return normalizeSelections(deduped.slice(0, 5));
+  return normalizeSelections(deduped.slice(0, 20));
 }
 
 export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
@@ -70,7 +70,7 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
     })),
   addTicker: (ticker) =>
     set((state) => {
-      if (!state.supportedTickers.includes(ticker) || state.selections.length >= 5) {
+      if (!state.supportedTickers.includes(ticker) || state.selections.length >= 20) {
         return state;
       }
       return {

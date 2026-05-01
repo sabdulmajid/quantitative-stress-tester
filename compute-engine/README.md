@@ -16,6 +16,8 @@ FastAPI service for fixed-shape GBM-based portfolio stress testing.
   "padded_cov": [[0.07, 0.03, 0.02], "... padded to 50x50"],
   "num_paths": 100000,
   "horizon_days": 252,
+  "confidence_level": 0.99,
+  "risk_free_rate": 0.02,
   "seed": 42
 }
 ```
@@ -24,5 +26,5 @@ FastAPI service for fixed-shape GBM-based portfolio stress testing.
 
 - The app prewarms the exact padded `50 x 50` execution shape during FastAPI startup.
 - Warm-path runs at the default `100000`-path setting were verified below one second in this environment.
-- The histogram response is capped at `50` bins and the raw path array is never returned.
+- The response includes 95%/99% VaR, selected confidence-level VaR, CVaR, annualized volatility, Sharpe ratio, and a `50`-bin histogram. The raw path array is never returned.
 - JAX selected a CPU backend here. For GPU deployment, install a CUDA-enabled JAX build on NVIDIA hosts.

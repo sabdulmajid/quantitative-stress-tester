@@ -1,10 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedSupabaseContext, mapStressRun } from "@/lib/server/persistence";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const context = await getAuthenticatedSupabaseContext();
+export async function GET(request: NextRequest) {
+  const context = await getAuthenticatedSupabaseContext(request.headers.get("authorization"));
 
   if (!context.enabled) {
     return NextResponse.json({ error: "Supabase persistence is not configured" }, { status: 503 });
@@ -16,7 +16,9 @@ export async function GET() {
 
   const { data, error } = await context.supabase
     .from("stress_runs")
-    .select("id, tickers, weights, horizon_days, seed, expected_return, var_95, elapsed_ms, created_at, provider, range")
+    .select(
+      "id, tickers, weights, horizon_days, seed, confidence_level, risk_free_rate, expected_return, var_95, var_99, value_at_risk, cvar, annualized_volatility, sharpe_ratio, elapsed_ms, data_fetch_ms, total_roundtrip_ms, created_at, provider, range"
+    )
     .eq("user_id", context.user.id)
     .order("created_at", { ascending: false })
     .limit(12);

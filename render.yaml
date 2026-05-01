@@ -1,4 +1,11 @@
 services:
+  - type: redis
+    name: quant-stress-redis
+    plan: starter
+    region: oregon
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
+
   - type: pserv
     runtime: docker
     name: quant-stress-compute
@@ -31,6 +38,17 @@ services:
         value: 3y
       - key: MARKET_DATA_CACHE_TTL
         value: 6h
+      - key: MARKET_DATA_FETCH_WORKERS
+        value: "2"
+      - key: MARKET_DATA_FETCH_MIN_WAIT
+        value: 120ms
+      - key: MARKET_DATA_FETCH_MAX_WAIT
+        value: 320ms
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: quant-stress-redis
+          property: connectionString
       - key: COMPUTE_ENGINE_URL
         fromService:
           type: pserv

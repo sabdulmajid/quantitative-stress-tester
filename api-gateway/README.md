@@ -5,6 +5,7 @@ Go gateway service for the quant stress engine.
 ## Routes
 
 - `GET /health`
+- `GET /metrics`
 - `GET /api/v1/supported-tickers`
 - `POST /api/v1/stress-test`
 
@@ -15,18 +16,19 @@ Go gateway service for the quant stress engine.
   "tickers": ["AAPL", "MSFT", "SPY"],
   "weights": [50, 30, 20],
   "horizon_days": 252,
+  "confidence_level": 0.99,
+  "risk_free_rate": 0.02,
   "seed": 42
 }
 ```
 
 ## Notes
 
-- Supported tickers are currently: `AAPL`, `MSFT`, `TSLA`, `SPY`, `GLD`.
-- `GET /api/v1/supported-tickers` returns the live UI contract, including provider metadata, cache TTL, and padded asset count.
-- The gateway fetches real historical price data, computes annualized `mu` and `Sigma` from daily log returns, pads them to `50`, and proxies the request to `POST /simulate`.
-- Historical series are cached in memory with a TTL to reduce repeat upstream requests.
-- Upstream market-data fetches retry on transient `429` and `5xx` responses before failing the request.
-- `net/http` handles incoming requests concurrently, and the cached series store is protected for safe shared reads and writes.
+- The gateway supports a 22-ticker universe and accepts up to 20 tickers per portfolio.
+- Historical prices are fetched from Yahoo Finance with a bounded worker pool, jittered scheduling, exponential backoff, and `Retry-After` handling.
+- Market data uses Redis when `REDIS_URL` is configured, with in-memory fallback. If Yahoo returns `429`, the gateway falls back to the last cached price series even when its freshness TTL has expired.
+- Every stress request emits structured `slog` telemetry for `compute_ms`, `data_fetch_ms`, and `total_roundtrip_ms`.
+- Prometheus metrics are exposed at `/metrics`.
 
 ## Environment
 
@@ -35,4 +37,8 @@ COMPUTE_ENGINE_URL=http://localhost:8000
 MARKET_DATA_BASE_URL=https://query1.finance.yahoo.com
 MARKET_DATA_RANGE=3y
 MARKET_DATA_CACHE_TTL=6h
+MARKET_DATA_FETCH_WORKERS=2
+MARKET_DATA_FETCH_MIN_WAIT=120ms
+MARKET_DATA_FETCH_MAX_WAIT=320ms
+REDIS_URL=redis://localhost:6379/0
 ```

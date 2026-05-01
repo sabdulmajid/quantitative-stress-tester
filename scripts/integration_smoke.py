@@ -8,19 +8,22 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from typing import Any
 
 
 GATEWAY_URL = os.environ.get("GATEWAY_URL", "http://localhost:8080").rstrip("/")
 COMPUTE_URL = os.environ.get("COMPUTE_URL", "http://localhost:8000").rstrip("/")
 UI_URL = os.environ.get("UI_URL", "").rstrip("/")
 WARM_THRESHOLD_MS = float(os.environ.get("WARM_THRESHOLD_MS", "1000"))
+REQUIRE_AUTH_FLOW = os.environ.get("REQUIRE_AUTH_FLOW", "0") == "1"
 
-PAYLOAD = {
-    "tickers": ["AAPL", "MSFT", "SPY"],
-    "weights": [50, 30, 20],
-    "horizon_days": 252,
-    "seed": 42,
-}
+SUPABASE_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL", os.environ.get("SUPABASE_URL", "")).rstrip("/")
+SUPABASE_KEY = os.environ.get(
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+    os.environ.get("SUPABASE_ANON_KEY", ""),
+)
+SUPABASE_TEST_EMAIL = os.environ.get("SUPABASE_TEST_EMAIL", "")
+SUPABASE_TEST_PASSWORD = os.environ.get("SUPABASE_TEST_PASSWORD", "")
 
 
 def wait_for_healthcheck(url: str, timeout_seconds: float = 90.0) -> None:
@@ -35,42 +38,72 @@ def wait_for_healthcheck(url: str, timeout_seconds: float = 90.0) -> None:
     raise SystemExit(f"healthcheck timed out: {url}")
 
 
-def post_json(url: str, payload: dict[str, object]) -> tuple[dict[str, object], float]:
-    request = urllib.request.Request(
-        url,
-        method="POST",
-        headers={"Content-Type": "application/json"},
-        data=json.dumps(payload).encode("utf-8"),
-    )
+def request_json(
+    method: str,
+    url: str,
+    payload: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: float = 120,
+) -> tuple[dict[str, Any], float]:
+    request_headers = dict(headers or {})
+    data = None
+    if payload is not None:
+        request_headers["Content-Type"] = "application/json"
+        data = json.dumps(payload).encode("utf-8")
 
+    request = urllib.request.Request(url, method=method, headers=request_headers, data=data)
     started_at = time.perf_counter()
-    with urllib.request.urlopen(request, timeout=120) as response:
-        body = response.read().decode("utf-8")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8")
+        raise SystemExit(f"{method} {url} failed with {exc.code}: {body}") from exc
     elapsed_ms = (time.perf_counter() - started_at) * 1000.0
     return json.loads(body), elapsed_ms
 
 
-def get_json(url: str) -> tuple[dict[str, object], float]:
-    request = urllib.request.Request(url, method="GET")
-
-    started_at = time.perf_counter()
-    with urllib.request.urlopen(request, timeout=60) as response:
-        body = response.read().decode("utf-8")
-    elapsed_ms = (time.perf_counter() - started_at) * 1000.0
-    return json.loads(body), elapsed_ms
+def get_json(url: str, headers: dict[str, str] | None = None) -> tuple[dict[str, Any], float]:
+    return request_json("GET", url, headers=headers, timeout=60)
 
 
-def assert_ticker_universe(response: dict[str, object]) -> None:
+def post_json(
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str] | None = None,
+) -> tuple[dict[str, Any], float]:
+    return request_json("POST", url, payload=payload, headers=headers)
+
+
+def assert_ticker_universe(response: dict[str, Any]) -> list[str]:
     tickers = response.get("tickers")
-    if not isinstance(tickers, list) or len(tickers) < 1:
-        raise SystemExit("expected at least one supported ticker")
+    if not isinstance(tickers, list) or len(tickers) < 20:
+        raise SystemExit("expected at least 20 supported tickers")
 
     for key in ("provider", "range", "cache_ttl_seconds", "max_portfolio_tickers", "padded_asset_count"):
         if key not in response:
             raise SystemExit(f"missing ticker universe key: {key}")
 
+    if int(response["max_portfolio_tickers"]) < 20:
+        raise SystemExit("expected max_portfolio_tickers to be at least 20")
+    return [str(ticker) for ticker in tickers[:20]]
 
-def assert_response_shape(response: dict[str, object]) -> None:
+
+def build_payload(tickers: list[str]) -> dict[str, Any]:
+    weight = round(100 / len(tickers), 6)
+    weights = [weight for _ in tickers]
+    weights[-1] = round(100 - sum(weights[:-1]), 6)
+    return {
+        "tickers": tickers,
+        "weights": weights,
+        "horizon_days": 252,
+        "confidence_level": 0.99,
+        "risk_free_rate": 0.02,
+        "seed": 42,
+    }
+
+
+def assert_response_shape(response: dict[str, Any], expected_ticker_count: int) -> None:
     histogram = response.get("histogram")
     if not isinstance(histogram, list) or len(histogram) != 50:
         raise SystemExit("expected 50 histogram bins in response")
@@ -87,8 +120,78 @@ def assert_response_shape(response: dict[str, object]) -> None:
     if frequency_total != 100000:
         raise SystemExit(f"expected histogram frequencies to sum to 100000, got {frequency_total}")
 
-    if float(response.get("var_95", -1)) < 0:
-        raise SystemExit("expected var_95 to be non-negative")
+    required_numeric_keys = (
+        "expected_return",
+        "var_95",
+        "var_99",
+        "value_at_risk",
+        "cvar",
+        "annualized_volatility",
+        "sharpe_ratio",
+        "elapsed_ms",
+        "data_fetch_ms",
+        "total_roundtrip_ms",
+    )
+    for key in required_numeric_keys:
+        if not isinstance(response.get(key), (int, float)):
+            raise SystemExit(f"missing numeric response key: {key}")
+
+    if float(response["value_at_risk"]) < 0 or float(response["cvar"]) < 0:
+        raise SystemExit("expected VaR and CVaR to be non-negative")
+
+    covariance = response.get("covariance_matrix")
+    correlation = response.get("correlation_matrix")
+    if not isinstance(covariance, list) or len(covariance) != expected_ticker_count:
+        raise SystemExit("unexpected covariance matrix shape")
+    if not isinstance(correlation, list) or len(correlation) != expected_ticker_count:
+        raise SystemExit("unexpected correlation matrix shape")
+
+
+def supabase_login() -> str | None:
+    if not (SUPABASE_URL and SUPABASE_KEY and SUPABASE_TEST_EMAIL and SUPABASE_TEST_PASSWORD):
+        if REQUIRE_AUTH_FLOW:
+            raise SystemExit("auth flow required but Supabase test credentials are not configured")
+        return None
+
+    payload = {"email": SUPABASE_TEST_EMAIL, "password": SUPABASE_TEST_PASSWORD}
+    response, _ = post_json(
+        f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
+        payload,
+        headers={"apikey": SUPABASE_KEY},
+    )
+    token = response.get("access_token")
+    if not isinstance(token, str) or not token:
+        raise SystemExit("Supabase login did not return an access token")
+    return token
+
+
+def run_authenticated_ui_flow(payload: dict[str, Any]) -> str:
+    if not UI_URL:
+        if REQUIRE_AUTH_FLOW:
+            raise SystemExit("auth flow required but UI_URL is not configured")
+        return "skipped:no-ui-url"
+
+    ui_universe, _ = get_json(f"{UI_URL}/api/v1/supported-tickers")
+    assert_ticker_universe(ui_universe)
+
+    token = supabase_login()
+    if token is None:
+        return "skipped:no-supabase-credentials"
+
+    auth_headers = {"Authorization": f"Bearer {token}"}
+    ui_response, _ = post_json(f"{UI_URL}/api/v1/stress-test", payload, headers=auth_headers)
+    assert_response_shape(ui_response, expected_ticker_count=20)
+
+    history, _ = get_json(f"{UI_URL}/api/v1/history", headers=auth_headers)
+    runs = history.get("runs")
+    if not isinstance(runs, list) or len(runs) == 0:
+        raise SystemExit("expected authenticated stress run history")
+    latest = runs[0]
+    if not isinstance(latest, dict) or len(latest.get("tickers", [])) != 20:
+        raise SystemExit("latest saved run did not contain the 20-ticker portfolio")
+    if float(latest.get("value_at_risk", -1)) < 0:
+        raise SystemExit("latest saved run is missing value_at_risk")
+    return "verified"
 
 
 def main() -> int:
@@ -96,20 +199,16 @@ def main() -> int:
     wait_for_healthcheck(f"{GATEWAY_URL}/health")
 
     ticker_universe, ticker_http_ms = get_json(f"{GATEWAY_URL}/api/v1/supported-tickers")
-    assert_ticker_universe(ticker_universe)
+    tickers = assert_ticker_universe(ticker_universe)
+    payload = build_payload(tickers)
 
-    warm_response, warm_http_ms = post_json(f"{GATEWAY_URL}/api/v1/stress-test", PAYLOAD)
-    assert_response_shape(warm_response)
+    warm_response, warm_http_ms = post_json(f"{GATEWAY_URL}/api/v1/stress-test", payload)
+    assert_response_shape(warm_response, expected_ticker_count=20)
 
-    hot_response, hot_http_ms = post_json(f"{GATEWAY_URL}/api/v1/stress-test", PAYLOAD)
-    assert_response_shape(hot_response)
+    hot_response, hot_http_ms = post_json(f"{GATEWAY_URL}/api/v1/stress-test", payload)
+    assert_response_shape(hot_response, expected_ticker_count=20)
 
-    ui_proxy_http_ms = None
-    if UI_URL:
-        ui_universe, _ = get_json(f"{UI_URL}/api/v1/supported-tickers")
-        assert_ticker_universe(ui_universe)
-        ui_response, ui_proxy_http_ms = post_json(f"{UI_URL}/api/v1/stress-test", PAYLOAD)
-        assert_response_shape(ui_response)
+    authenticated_flow = run_authenticated_ui_flow(payload)
 
     compute_elapsed_ms = float(hot_response["elapsed_ms"])
     if compute_elapsed_ms >= WARM_THRESHOLD_MS:
@@ -123,11 +222,17 @@ def main() -> int:
                 "warmup_http_ms": round(warm_http_ms, 2),
                 "warm_http_ms": round(hot_http_ms, 2),
                 "warm_compute_ms": round(compute_elapsed_ms, 2),
+                "data_fetch_ms": round(float(hot_response["data_fetch_ms"]), 2),
+                "total_roundtrip_ms": round(float(hot_response["total_roundtrip_ms"]), 2),
                 "ticker_universe_http_ms": round(ticker_http_ms, 2),
-                "ui_proxy_http_ms": None if ui_proxy_http_ms is None else round(ui_proxy_http_ms, 2),
+                "authenticated_ui_flow": authenticated_flow,
                 "provider": ticker_universe["provider"],
-                "var_95": hot_response["var_95"],
-                "expected_return": hot_response["expected_return"],
+                "ticker_count": len(tickers),
+                "confidence_level": hot_response["confidence_level"],
+                "value_at_risk": hot_response["value_at_risk"],
+                "cvar": hot_response["cvar"],
+                "annualized_volatility": hot_response["annualized_volatility"],
+                "sharpe_ratio": hot_response["sharpe_ratio"],
             },
             indent=2,
         )

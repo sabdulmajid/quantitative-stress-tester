@@ -4,12 +4,13 @@ This directory contains the persistence schema for the web application.
 
 ## Apply
 
-Run the migration in [migrations/202604250001_quant_stress_engine.sql](/mnt/slurm_nfs/a6abdulm/projects/quant-stress-engine/supabase/migrations/202604250001_quant_stress_engine.sql:1) against your Supabase project.
+Run every migration in [migrations](/mnt/slurm_nfs/a6abdulm/projects/quant-stress-engine/supabase/migrations) against your Supabase project in filename order.
 
 ## What It Creates
 
 - `saved_portfolios`
 - `stress_runs`
+- analytics columns for VaR, CVaR, volatility, Sharpe, and timing telemetry
 - row-level security policies scoped to `auth.uid()`
 
 ## Required UI Environment Variables
