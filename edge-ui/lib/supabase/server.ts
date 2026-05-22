@@ -15,15 +15,24 @@ type CookieMutation = {
   };
 };
 
-export async function createServerSupabaseClient() {
+export async function createServerSupabaseClient(accessToken?: string | null) {
   const env = getSupabaseEnv();
   if (!env.enabled) {
     return null;
   }
 
   const cookieStore = await cookies();
+  const global =
+    accessToken && accessToken.trim()
+      ? {
+          headers: {
+            Authorization: `Bearer ${accessToken.trim()}`
+          }
+        }
+      : undefined;
 
   return createServerClient(env.url, env.key, {
+    global,
     cookies: {
       getAll() {
         return cookieStore.getAll();

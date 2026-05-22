@@ -59,12 +59,12 @@ function riskContributionsAreValid(values: unknown): values is RiskContribution[
 }
 
 export async function getAuthenticatedSupabaseContext(authorizationHeader?: string | null) {
-  const supabase = await createServerSupabaseClient();
+  const token = bearerToken(authorizationHeader);
+  const supabase = await createServerSupabaseClient(token);
   if (!supabase) {
     return { enabled: false as const, supabase: null, user: null };
   }
 
-  const token = bearerToken(authorizationHeader);
   const {
     data: { user }
   } = token ? await supabase.auth.getUser(token) : await supabase.auth.getUser();
