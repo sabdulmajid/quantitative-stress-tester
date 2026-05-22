@@ -1,4 +1,4 @@
-from functools import partial
+from functools import lru_cache
 
 import jax
 import jax.numpy as jnp
@@ -7,6 +7,18 @@ from app.models.stress import DEFAULT_PATHS, HISTOGRAM_BINS, MAX_ASSETS
 
 
 _DIAGONAL_JITTER = 1e-6
+_RANDOM_DRAW_CACHE_SIZE = 4
+
+
+@lru_cache(maxsize=_RANDOM_DRAW_CACHE_SIZE)
+def _standard_normal_draws(seed: int, num_paths: int) -> jax.Array:
+    random_draws = jax.random.normal(
+        jax.random.PRNGKey(seed),
+        shape=(MAX_ASSETS, num_paths),
+        dtype=jnp.float32,
+    )
+    random_draws.block_until_ready()
+    return random_draws
 
 
 def _single_path_portfolio_return(
@@ -22,7 +34,26 @@ def _single_path_portfolio_return(
     return jnp.dot(padded_weights, terminal_growth - 1.0)
 
 
-@partial(jax.jit, static_argnames=("num_paths",))
+@jax.jit
+def _simulate_portfolio_gbm_with_draws(
+    padded_weights: jax.Array,
+    padded_mu: jax.Array,
+    padded_cov: jax.Array,
+    random_draws: jax.Array,
+    horizon: int,
+) -> jax.Array:
+    safe_cov = padded_cov + jnp.eye(MAX_ASSETS, dtype=jnp.float32) * _DIAGONAL_JITTER
+    cholesky = jnp.linalg.cholesky(safe_cov)
+    variances = jnp.diag(safe_cov)
+    horizon_years = jnp.asarray(horizon / 252.0, dtype=jnp.float32)
+    correlated_draws = (cholesky @ random_draws).T
+
+    return jax.vmap(
+        _single_path_portfolio_return,
+        in_axes=(0, None, None, None, None),
+    )(correlated_draws, padded_weights, padded_mu, variances, horizon_years)
+
+
 def simulate_portfolio_gbm(
     padded_weights: jax.Array,
     padded_mu: jax.Array,
@@ -31,22 +62,14 @@ def simulate_portfolio_gbm(
     horizon: int = 252,
     seed: int = 42,
 ) -> jax.Array:
-    safe_cov = padded_cov + jnp.eye(MAX_ASSETS, dtype=jnp.float32) * _DIAGONAL_JITTER
-    cholesky = jnp.linalg.cholesky(safe_cov)
-    variances = jnp.diag(safe_cov)
-    horizon_years = jnp.asarray(horizon / 252.0, dtype=jnp.float32)
-
-    random_draws = jax.random.normal(
-        jax.random.PRNGKey(seed),
-        shape=(MAX_ASSETS, num_paths),
-        dtype=jnp.float32,
+    random_draws = _standard_normal_draws(int(seed), int(num_paths))
+    return _simulate_portfolio_gbm_with_draws(
+        padded_weights=padded_weights,
+        padded_mu=padded_mu,
+        padded_cov=padded_cov,
+        random_draws=random_draws,
+        horizon=horizon,
     )
-    correlated_draws = (cholesky @ random_draws).T
-
-    return jax.vmap(
-        _single_path_portfolio_return,
-        in_axes=(0, None, None, None, None),
-    )(correlated_draws, padded_weights, padded_mu, variances, horizon_years)
 
 
 def summarize_portfolio_returns(
@@ -113,7 +136,7 @@ def prewarm_gbm_engine() -> None:
         padded_cov=padded_cov,
         num_paths=DEFAULT_PATHS,
         horizon=252,
-        seed=0,
+        seed=42,
     )
     portfolio_returns.block_until_ready()
     summarize_portfolio_returns(portfolio_returns)
