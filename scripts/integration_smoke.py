@@ -84,6 +84,12 @@ def assert_ticker_universe(response: dict[str, Any]) -> list[str]:
         if key not in response:
             raise SystemExit(f"missing ticker universe key: {key}")
 
+    scenarios = response.get("scenarios")
+    if not isinstance(scenarios, list) or not any(
+        isinstance(scenario, dict) and scenario.get("id") == "financial_crisis_2008" for scenario in scenarios
+    ):
+        raise SystemExit("expected financial_crisis_2008 scenario metadata")
+
     if int(response["max_portfolio_tickers"]) < 20:
         raise SystemExit("expected max_portfolio_tickers to be at least 20")
     return [str(ticker) for ticker in tickers[:20]]
@@ -100,6 +106,7 @@ def build_payload(tickers: list[str]) -> dict[str, Any]:
         "confidence_level": 0.99,
         "risk_free_rate": 0.02,
         "seed": 42,
+        "scenario_id": "financial_crisis_2008",
     }
 
 
@@ -145,6 +152,24 @@ def assert_response_shape(response: dict[str, Any], expected_ticker_count: int) 
         raise SystemExit("unexpected covariance matrix shape")
     if not isinstance(correlation, list) or len(correlation) != expected_ticker_count:
         raise SystemExit("unexpected correlation matrix shape")
+
+    scenario = response.get("scenario")
+    if not isinstance(scenario, dict) or scenario.get("id") != "financial_crisis_2008":
+        raise SystemExit("unexpected scenario metadata in stress response")
+
+    risk_contributions = response.get("risk_contributions")
+    if not isinstance(risk_contributions, list) or len(risk_contributions) != expected_ticker_count:
+        raise SystemExit("unexpected risk contribution shape")
+    contribution_total = 0.0
+    for contribution in risk_contributions:
+        if not isinstance(contribution, dict):
+            raise SystemExit("risk contribution entries must be objects")
+        for key in ("ticker", "weight", "marginal_volatility", "volatility_contribution", "contribution_percent"):
+            if key not in contribution:
+                raise SystemExit(f"missing risk contribution key: {key}")
+        contribution_total += float(contribution["contribution_percent"])
+    if not 0.99 <= contribution_total <= 1.01:
+        raise SystemExit(f"risk contribution percentages should sum to one, got {contribution_total}")
 
 
 def supabase_login() -> str | None:

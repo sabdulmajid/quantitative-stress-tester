@@ -1,4 +1,12 @@
-import type { AppUser, ConfidenceLevel, HorizonDays, PortfolioSelection, SavedPortfolio, StressRunRecord } from "@/lib/types";
+import type {
+  AppUser,
+  ConfidenceLevel,
+  HorizonDays,
+  PortfolioSelection,
+  RiskContribution,
+  SavedPortfolio,
+  StressRunRecord
+} from "@/lib/types";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 function selectionsAreValid(selections: unknown): selections is PortfolioSelection[] {
@@ -22,6 +30,32 @@ function bearerToken(authorizationHeader: string | null | undefined) {
   }
   const [scheme, token] = authorizationHeader.trim().split(/\s+/, 2);
   return scheme?.toLowerCase() === "bearer" && token ? token : null;
+}
+
+function riskContributionsAreValid(values: unknown): values is RiskContribution[] {
+  if (!Array.isArray(values)) {
+    return false;
+  }
+
+  return values.every((value) => {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+    const candidate = value as {
+      ticker?: unknown;
+      weight?: unknown;
+      marginal_volatility?: unknown;
+      volatility_contribution?: unknown;
+      contribution_percent?: unknown;
+    };
+    return (
+      typeof candidate.ticker === "string" &&
+      typeof candidate.weight === "number" &&
+      typeof candidate.marginal_volatility === "number" &&
+      typeof candidate.volatility_contribution === "number" &&
+      typeof candidate.contribution_percent === "number"
+    );
+  });
 }
 
 export async function getAuthenticatedSupabaseContext(authorizationHeader?: string | null) {
@@ -71,6 +105,8 @@ export function mapStressRun(row: {
   weights: number[] | null;
   horizon_days: number | null;
   seed: number | null;
+  scenario_id: string | null;
+  scenario_label: string | null;
   confidence_level: number | null;
   risk_free_rate: number | null;
   expected_return: number | null;
@@ -86,6 +122,7 @@ export function mapStressRun(row: {
   created_at: string;
   provider: string | null;
   range: string | null;
+  risk_contributions: unknown;
 }): StressRunRecord {
   const confidenceLevel: ConfidenceLevel = row.confidence_level === 0.99 ? 0.99 : 0.95;
   const horizonDays: HorizonDays = row.horizon_days === 1 || row.horizon_days === 10 ? row.horizon_days : 252;
@@ -96,6 +133,8 @@ export function mapStressRun(row: {
     weights: row.weights ?? [],
     horizon_days: horizonDays,
     seed: row.seed ?? 42,
+    scenario_id: row.scenario_id ?? "baseline",
+    scenario_label: row.scenario_label,
     confidence_level: confidenceLevel,
     risk_free_rate: row.risk_free_rate ?? 0,
     expected_return: row.expected_return ?? 0,
@@ -110,6 +149,7 @@ export function mapStressRun(row: {
     total_roundtrip_ms: row.total_roundtrip_ms,
     created_at: row.created_at,
     provider: row.provider,
-    range: row.range
+    range: row.range,
+    risk_contributions: riskContributionsAreValid(row.risk_contributions) ? row.risk_contributions : []
   };
 }

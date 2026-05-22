@@ -45,26 +45,26 @@ export default function DistributionChart({
   });
 
   return (
-    <section className="rounded-[2rem] border border-white/60 bg-slate-950 p-6 text-white shadow-[0_24px_80px_rgba(15,23,42,0.24)]">
+    <section className="rounded-lg border border-white/60 bg-slate-950 p-6 text-white">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-teal-300/70">Distribution</p>
-          <h2 className="mt-2 text-2xl font-semibold tracking-tight">Simulation histogram</h2>
+          <p className="text-xs font-semibold uppercase text-teal-300/70">Distribution</p>
+          <h2 className="mt-2 text-2xl font-semibold">Simulation histogram</h2>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-300">
             50 bins from the backend. The selected loss tail is highlighted red.
           </p>
         </div>
-        <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-          <div className="text-xs uppercase tracking-[0.24em] text-slate-400">VaR {Math.round(confidenceLevel * 100)}%</div>
+        <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3">
+          <div className="text-xs uppercase text-slate-400">VaR {Math.round(confidenceLevel * 100)}%</div>
           <div className="mt-1 text-lg font-semibold text-rose-300">{formatDisplayValue(valueAtRisk)}</div>
         </div>
       </div>
 
       <div className="mt-6 h-[360px]">
         {loading ? (
-          <div className="flex h-full flex-col justify-end gap-2 rounded-2xl bg-white/5 p-4">
-            <div className="h-2 overflow-hidden rounded-full bg-white/10">
-              <div className="simulation-progress h-full rounded-full bg-teal-300" />
+          <div className="flex h-full flex-col justify-end gap-2 rounded-lg bg-white/5 p-4">
+            <div className="h-2 overflow-hidden rounded-md bg-white/10">
+              <div className="simulation-progress h-full rounded-md bg-teal-300" />
             </div>
             <div className="grid h-64 grid-cols-12 items-end gap-2">
               {Array.from({ length: 48 }, (_, index) => (
@@ -97,7 +97,7 @@ export default function DistributionChart({
               <Tooltip
                 cursor={{ fill: "rgba(255,255,255,0.06)" }}
                 contentStyle={{
-                  borderRadius: 16,
+                  borderRadius: 8,
                   border: "1px solid rgba(148, 163, 184, 0.18)",
                   background: "rgba(15, 23, 42, 0.96)",
                   color: "#fff"
@@ -111,7 +111,7 @@ export default function DistributionChart({
                   return row?.label ?? "";
                 }}
               />
-              <Bar dataKey="frequency" radius={[10, 10, 0, 0]} barSize={12}>
+              <Bar dataKey="frequency" radius={[4, 4, 0, 0]} barSize={12}>
                 {bars.map((entry) => (
                   <Cell key={`${entry.bin_start}-${entry.bin_end}`} fill={entry.isTail ? "#ef4444" : "#38bdf8"} />
                 ))}

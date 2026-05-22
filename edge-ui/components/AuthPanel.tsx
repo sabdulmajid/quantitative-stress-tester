@@ -88,9 +88,9 @@ export default function AuthPanel({
 
   if (!enabled) {
     return (
-      <section className="rounded-[2rem] border border-amber-200 bg-amber-50/90 p-6 shadow-[0_24px_80px_rgba(120,53,15,0.08)]">
-        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-amber-700/80">Persistence</p>
-        <h2 className="mt-2 text-2xl font-semibold tracking-tight text-amber-950">Guest mode</h2>
+      <section className="rounded-lg border border-amber-200 bg-amber-50/90 p-6">
+        <p className="text-xs font-semibold uppercase text-amber-700/80">Persistence</p>
+        <h2 className="mt-2 text-2xl font-semibold text-amber-950">Guest mode</h2>
         <p className="mt-2 text-sm leading-6 text-amber-900/80">
           Supabase is not configured in this environment yet, so authentication, saved portfolios, and run history are
           disabled. The stress engine still works.
@@ -100,26 +100,26 @@ export default function AuthPanel({
   }
 
   return (
-    <section className="rounded-[2rem] border border-white/60 bg-white/78 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur">
+    <section className="rounded-lg border border-white/60 bg-white p-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-teal-800/70">Account</p>
-          <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+          <p className="text-xs font-semibold uppercase text-teal-800/70">Account</p>
+          <h2 className="mt-2 text-2xl font-semibold text-slate-950">
             {user ? "Signed in" : "Sign in to save your work"}
           </h2>
         </div>
         {loading ? (
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">Loading</span>
+          <span className="rounded-md bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">Loading</span>
         ) : null}
       </div>
 
       {user ? (
-        <div className="mt-5 rounded-3xl border border-slate-200 bg-slate-50 p-5">
+        <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-5">
           <div className="text-sm text-slate-500">Current user</div>
           <div className="mt-1 text-lg font-semibold text-slate-950">{user.email ?? user.id}</div>
           <button
             type="button"
-            className="mt-4 rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="mt-4 rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
             onClick={handleSignOut}
             disabled={submitting}
           >
@@ -128,7 +128,7 @@ export default function AuthPanel({
         </div>
       ) : (
         <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
-          <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1">
+          <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-1">
             {(["sign-in", "sign-up"] as const).map((nextMode) => (
               <button
                 key={nextMode}
@@ -138,7 +138,7 @@ export default function AuthPanel({
                   setError(null);
                   setMessage(null);
                 }}
-                className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                className={`rounded-md px-4 py-2 text-sm font-medium transition ${
                   mode === nextMode ? "bg-slate-950 text-white" : "text-slate-600 hover:text-slate-950"
                 }`}
               >
@@ -174,7 +174,7 @@ export default function AuthPanel({
 
           <button
             type="submit"
-            className="rounded-full bg-teal-700 px-5 py-3 text-sm font-medium text-white transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="rounded-md bg-teal-700 px-5 py-3 text-sm font-medium text-white transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300"
             disabled={submitting}
           >
             {submitting ? "Working..." : formatModeLabel(mode)}
@@ -183,13 +183,13 @@ export default function AuthPanel({
       )}
 
       {message ? (
-        <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
           {message}
         </div>
       ) : null}
 
       {error ? (
-        <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div>
+        <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div>
       ) : null}
     </section>
   );

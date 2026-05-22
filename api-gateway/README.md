@@ -18,7 +18,8 @@ Go gateway service for the quant stress engine.
   "horizon_days": 252,
   "confidence_level": 0.99,
   "risk_free_rate": 0.02,
-  "seed": 42
+  "seed": 42,
+  "scenario_id": "financial_crisis_2008"
 }
 ```
 
@@ -27,6 +28,8 @@ Go gateway service for the quant stress engine.
 - The gateway supports a 22-ticker universe and accepts up to 20 tickers per portfolio.
 - Historical prices are fetched from Yahoo Finance with a bounded worker pool, jittered scheduling, exponential backoff, and `Retry-After` handling.
 - Market data uses Redis when `REDIS_URL` is configured, with in-memory fallback. If Yahoo returns `429`, the gateway falls back to the last cached price series even when its freshness TTL has expired.
+- `GET /api/v1/supported-tickers` returns the scenario catalog. `POST /api/v1/stress-test` applies the selected drift/covariance shock before padding.
+- Stress responses include per-asset volatility contribution in `risk_contributions` without changing the fixed JAX payload.
 - Every stress request emits structured `slog` telemetry for `compute_ms`, `data_fetch_ms`, and `total_roundtrip_ms`.
 - Prometheus metrics are exposed at `/metrics`.
 

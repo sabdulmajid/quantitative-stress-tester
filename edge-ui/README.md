@@ -39,5 +39,6 @@ The stress routes proxy server-side to `API_GATEWAY_INTERNAL_URL`. The persisten
 - The UI uses Zustand for portfolio state, debounced slider updates, Recharts for the 50-bin histogram view, and Supabase SSR auth when the public Supabase env vars are present.
 - The supported ticker universe is fetched from the gateway at runtime instead of being hardcoded in the frontend bundle.
 - Operators can choose 95% or 99% confidence, 1-day/10-day/1-year horizons, and a risk-free rate for Sharpe.
-- The dashboard renders VaR, CVaR, annualized volatility, Sharpe, gateway telemetry, and a covariance-backed correlation heatmap.
+- The dashboard renders VaR, CVaR, annualized volatility, Sharpe, gateway telemetry, scenario shocks, volatility contribution, and covariance-backed correlation heatmaps.
+- Active runs can be exported as structured JSON containing request inputs, scenario metadata, risk metrics, matrix layouts, histogram bins, attribution, and timing telemetry.
 - If Supabase is not configured, the UI falls back to guest mode while keeping the core stress workflow available.

@@ -3,7 +3,7 @@
 ## Master Agent
 - Owns cross-service architecture, interface control, validation, and deployment readiness.
 - Defines the fixed-shape execution contract shared across compute, gateway, and UI.
-- Coordinates subagents in parallel and resolves drift between service layers.
+- Coordinates service-owned work and resolves drift between gateway, compute, UI, persistence, and deployment layers.
 
 ## Subagent A: Compute Engineer
 - Scope: `compute-engine/`
@@ -15,7 +15,7 @@
   - Implement `simulate_portfolio_gbm(padded_weights, padded_mu, padded_cov, num_paths=100000, horizon=252)`.
   - Use Cholesky decomposition of the padded covariance matrix.
   - Use `jax.vmap` across the path dimension and `jax.jit` over the simulation.
-  - Expose `POST /simulate` returning only `var_95`, `expected_return`, `elapsed_ms`, and `50` histogram bins.
+  - Expose `POST /simulate` returning expected return, 95%/99% VaR, selected confidence VaR, CVaR, annualized volatility, Sharpe ratio, elapsed time, and exactly `50` histogram bins.
 
 ## Subagent B: Systems Gateway
 - Scope: `api-gateway/`
@@ -23,13 +23,16 @@
 - Responsibilities:
   - Build a highly concurrent native controller on port `8080`.
   - Receive standard HTTP requests from the frontend.
-  - Fetch real historical price data for `AAPL`, `MSFT`, `TSLA`, `SPY`, and `GLD`, with an in-memory cache standing in for Redis until a dedicated cache tier is added.
+  - Fetch real historical price data for the `22` supported symbols exposed by `GET /api/v1/supported-tickers`.
+  - Use Redis for shared market-data caching when configured, with an in-memory fallback for local and degraded operation.
   - Derive annualized `mu` and covariance `Sigma` from aligned daily log returns.
-  - Extract the relevant subvector and submatrix for the requested tickers.
+  - Extract the relevant subvector and submatrix for up to `20` requested tickers.
+  - Apply gateway-owned macroeconomic scenario shocks to drift and covariance before fixed-shape padding.
+  - Calculate per-asset contribution to total volatility without changing the JAX compute contract.
   - Pad weights and `mu` to length `50` and `Sigma` to `50 x 50`.
   - Proxy the padded execution payload to the JAX worker.
-  - Expose `GET /api/v1/supported-tickers` for frontend discovery.
-  - Expose `POST /api/v1/stress-test`.
+  - Expose `GET /api/v1/supported-tickers` with provider, range, cache, selection-limit, padding, ticker, and scenario metadata.
+  - Expose `POST /api/v1/stress-test` with VaR, CVaR, volatility, Sharpe, scenario, attribution, matrix, histogram, and timing fields.
 
 ## Subagent C: Frontend Developer
 - Scope: `edge-ui/`
@@ -38,9 +41,10 @@
   - Scaffold the operator UI with a Zustand store.
   - Manage portfolio weights through debounced inputs.
   - Discover the supported ticker universe from the gateway instead of hardcoding it in the bundle.
-  - Provide a portfolio editor for up to `5` tickers.
+  - Provide a portfolio editor for up to `20` tickers while preserving the `50`-asset execution payload downstream.
   - Render the histogram using a React charting library such as Recharts.
-  - Color the bottom `5%` of the histogram red to indicate VaR.
+  - Color the selected lower-tail histogram region red to indicate VaR.
+  - Display risk attribution, scenario selection, covariance/correlation matrices, authenticated history, and structured run export.
   - Connect the UI to the Go gateway at `localhost:8080` in local development.
 
 ## Subagent D: DevOps and QA
@@ -57,12 +61,17 @@
 - Gateway health: `GET /health`
 - Gateway supported tickers: `GET /api/v1/supported-tickers`
 - Gateway public API: `POST /api/v1/stress-test`
+- UI BFF supported tickers: `GET /api/v1/supported-tickers`
+- UI BFF public API: `POST /api/v1/stress-test`
+- UI persistence: `GET|POST /api/v1/portfolio`, `GET /api/v1/history`
 - Fixed dimensions:
   - weights: `50`
   - mu: `50`
   - covariance: `50 x 50`
   - histogram bins: `50`
   - Monte Carlo paths: `100000`
+- Gateway maximum live portfolio selection: `20`
+- Gateway supported ticker universe: `22`
 
 ## Coordination Rules
 - Each subagent edits only its assigned directory unless the Master Agent reassigns ownership.

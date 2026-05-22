@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   const { data, error } = await context.supabase
     .from("stress_runs")
     .select(
-      "id, tickers, weights, horizon_days, seed, confidence_level, risk_free_rate, expected_return, var_95, var_99, value_at_risk, cvar, annualized_volatility, sharpe_ratio, elapsed_ms, data_fetch_ms, total_roundtrip_ms, created_at, provider, range"
+      "id, tickers, weights, horizon_days, seed, scenario_id, scenario_label, confidence_level, risk_free_rate, expected_return, var_95, var_99, value_at_risk, cvar, annualized_volatility, sharpe_ratio, elapsed_ms, data_fetch_ms, total_roundtrip_ms, created_at, provider, range, risk_contributions"
     )
     .eq("user_id", context.user.id)
     .order("created_at", { ascending: false })

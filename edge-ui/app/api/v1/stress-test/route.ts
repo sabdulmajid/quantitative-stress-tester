@@ -32,6 +32,8 @@ export async function POST(request: NextRequest) {
           weights: payload.weights ?? [],
           horizon_days: payload.horizon_days ?? 252,
           seed: payload.seed ?? 42,
+          scenario_id: result.scenario.id,
+          scenario_label: result.scenario.label,
           confidence_level: result.confidence_level,
           risk_free_rate: result.risk_free_rate,
           expected_return: result.expected_return,
@@ -45,6 +47,7 @@ export async function POST(request: NextRequest) {
           data_fetch_ms: result.data_fetch_ms,
           total_roundtrip_ms: result.total_roundtrip_ms,
           histogram: result.histogram,
+          risk_contributions: result.risk_contributions,
           provider: result.provider ?? null,
           range: result.range ?? null
         });

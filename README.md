@@ -1,13 +1,17 @@
 # Quant Stress Engine
 
-Three-tier portfolio stress-testing application:
+Quant Stress Engine is a production-oriented portfolio risk platform built around a fixed-shape Monte Carlo execution contract. It combines a FastAPI/JAX compute worker, a concurrent Go market-data gateway, a Next.js BFF and operator UI, Redis-backed price caching, and optional Supabase persistence for portfolios and run history.
 
-- `compute-engine/`: FastAPI service with JAX/XLA fixed-shape Monte Carlo simulation
-- `api-gateway/`: Go gateway for market data, analytics orchestration, Redis-backed caching, metrics, and compute proxying
-- `edge-ui/`: Next.js frontend for auth, portfolio selection, analytics visualization, and run history
-- `supabase/`: PostgreSQL migrations for saved portfolios and stress-run telemetry
+## Why This Project Matters
 
-## System Architecture
+Institutional risk systems are judged by how well they coordinate data freshness, execution determinism, and operator ergonomics under load. This project demonstrates those concerns in a compact open-source architecture:
+
+- A Go gateway coordinates concurrent historical data pulls, cache reuse, rate-limit fallback, annualized moment construction, scenario shocks, and compute proxying.
+- The compute engine keeps tensor shapes static at `50` assets, `100000` Monte Carlo paths, and `50` histogram bins so JAX/XLA compiles the exact production path during startup.
+- The Next.js BFF protects private services from the browser, supports Supabase cookie authentication, and still runs the core stress workflow in guest mode when Supabase is absent.
+- The UI exposes operator-grade risk outputs: VaR, CVaR, Sharpe ratio, annualized volatility, covariance/correlation matrices, scenario stress, per-asset volatility contribution, and structured JSON export.
+
+## System Topology
 
 ```mermaid
 flowchart LR
@@ -21,22 +25,44 @@ flowchart LR
   Gateway --> UI
 ```
 
-The compute tier simulates `100000` portfolio paths using padded vectors of length `50` and covariance matrices of shape `50 x 50`. The startup warmup compiles that static execution shape before live traffic reaches `POST /simulate`.
+| Tier | Path | Runtime | Responsibility |
+| --- | --- | --- | --- |
+| Compute | `compute-engine/` | FastAPI, JAX, XLA | Validates the fixed padded payload, runs the GBM Monte Carlo kernel, returns risk metrics and exactly `50` histogram bins. |
+| Gateway | `api-gateway/` | Go | Fetches and caches market data, derives annualized `mu` and `Sigma`, applies scenario shocks, pads the compute payload, computes risk attribution, and exposes Prometheus metrics. |
+| UI and BFF | `edge-ui/` | Next.js App Router, TypeScript, Tailwind | Discovers gateway capabilities, manages portfolios, proxies private gateway calls, handles optional Supabase SSR auth, renders analytics, and exports runs. |
+| Persistence | `supabase/` | Postgres, RLS | Stores saved portfolios, authenticated run history, scenario metadata, and risk attribution JSON. |
+| Cache | Render Redis or local Redis | Redis | Shares historical price series across gateway instances with in-memory fallback when Redis is unavailable. |
 
-The gateway fetches historical prices for the supported ticker universe, aligns daily log returns, derives annualized drift and covariance, pads the fixed-shape compute payload, and enriches the response with covariance/correlation matrices plus telemetry.
+## Execution Contract
 
-## API Contract
+| Field | Contract |
+| --- | --- |
+| Asset vector length | `50` padded weights and `50` padded annualized drift values |
+| Covariance shape | `50 x 50` padded annualized covariance matrix |
+| Monte Carlo paths | `100000` |
+| Histogram bins | `50` |
+| Live portfolio selection | Up to `20` requested tickers |
+| Supported universe | `22` gateway-discovered symbols |
+| Compile behavior | Compute service prewarms the exact fixed-shape JAX path on startup |
 
-- Compute health: `GET /health`
-- Compute simulation: `POST /simulate`
-- Gateway health: `GET /health`
-- Gateway metrics: `GET /metrics`
-- Gateway supported tickers: `GET /api/v1/supported-tickers`
-- Gateway stress route: `POST /api/v1/stress-test`
-- UI portfolio route: `GET|POST /api/v1/portfolio`
-- UI run history route: `GET /api/v1/history`
+The gateway may enrich the request with scenario shocks and risk attribution, but it does not alter the compute shape. Scenario scaling is applied to selected drift and covariance values before padding.
 
-Stress requests support:
+## API Surface
+
+| Service | Method | Endpoint | Purpose |
+| --- | --- | --- | --- |
+| Compute | `GET` | `/health` | Compute readiness probe. |
+| Compute | `POST` | `/simulate` | Fixed-shape JAX simulation. Accepts padded `weights`, `mu`, `covariance`, path count, horizon, confidence, risk-free rate, and seed. |
+| Gateway | `GET` | `/health` | Gateway readiness probe. |
+| Gateway | `GET` | `/metrics` | Prometheus counters and histograms for HTTP, data-fetch, compute, and round-trip timing. |
+| Gateway | `GET` | `/api/v1/supported-tickers` | Returns provider metadata, cache TTL, max selection count, padded asset count, ticker universe, and supported macro scenarios. |
+| Gateway | `POST` | `/api/v1/stress-test` | Runs market-data enrichment, scenario scaling, JAX simulation, risk attribution, and matrix response assembly. |
+| UI BFF | `GET` | `/api/v1/supported-tickers` | Server-side proxy to the private gateway. |
+| UI BFF | `POST` | `/api/v1/stress-test` | Server-side proxy to the private gateway plus optional authenticated persistence. |
+| UI BFF | `GET|POST` | `/api/v1/portfolio` | Authenticated saved portfolio read/write when Supabase is configured. |
+| UI BFF | `GET` | `/api/v1/history` | Authenticated recent stress-run history. |
+
+Example gateway request:
 
 ```json
 {
@@ -45,26 +71,59 @@ Stress requests support:
   "horizon_days": 252,
   "confidence_level": 0.99,
   "risk_free_rate": 0.02,
-  "seed": 42
+  "seed": 42,
+  "scenario_id": "financial_crisis_2008"
 }
 ```
 
-Responses include `expected_return`, `var_95`, `var_99`, selected `value_at_risk`, `cvar`, `annualized_volatility`, `sharpe_ratio`, `histogram`, timing telemetry, `covariance_matrix`, and `correlation_matrix`.
+Gateway responses include `expected_return`, `var_95`, `var_99`, selected `value_at_risk`, `cvar`, `annualized_volatility`, `sharpe_ratio`, `histogram`, `scenario`, `risk_contributions`, timing telemetry, `mu`, `covariance_matrix`, and `correlation_matrix`.
 
-## Local Run
+## Environment Variables
+
+| Scope | Variable | Default | Required | Description |
+| --- | --- | --- | --- | --- |
+| Compute | `PORT` | `8000` | No | Uvicorn listen port. |
+| Gateway | `PORT` | `8080` | No | Gateway listen port when `API_GATEWAY_ADDR` is not set. |
+| Gateway | `API_GATEWAY_ADDR` | `:8080` | No | Explicit Go listen address. |
+| Gateway | `COMPUTE_ENGINE_URL` | `http://localhost:8000` | Yes in deployment | Internal compute service URL or Render hostport. |
+| Gateway | `REQUEST_TIMEOUT` | `30s` | No | HTTP server and upstream request timeout. |
+| Gateway | `MARKET_DATA_BASE_URL` | `https://query1.finance.yahoo.com` | No | Yahoo Finance chart API base URL. |
+| Gateway | `MARKET_DATA_RANGE` | `3y` | No | Historical lookback range. |
+| Gateway | `MARKET_DATA_CACHE_TTL` | `6h` | No | Freshness window for Redis or in-memory market data. |
+| Gateway | `MARKET_DATA_FETCH_WORKERS` | `2` | No | Concurrent fetch worker count. |
+| Gateway | `MARKET_DATA_FETCH_MIN_WAIT` | `120ms` | No | Lower jitter bound between cold market-data requests. |
+| Gateway | `MARKET_DATA_FETCH_MAX_WAIT` | `320ms` | No | Upper jitter bound between cold market-data requests. |
+| Gateway | `REDIS_URL` | empty | No | Redis connection string; gateway falls back to in-memory cache if absent. |
+| UI | `PORT` | `3000` | No | Next.js standalone server port. |
+| UI | `API_GATEWAY_INTERNAL_URL` | `http://localhost:8080` | Yes in deployment | Private gateway endpoint used by BFF routes. |
+| UI | `NEXT_PUBLIC_SUPABASE_URL` | empty | No | Enables Supabase auth and persistence when paired with a publishable key. |
+| UI | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | empty | No | Supabase browser and SSR publishable key. |
+
+## Performance Benchmarks
+
+Benchmarks are from [BENCHMARK.md](BENCHMARK.md) on a local Linux CPU environment with market data warmed and the compute, gateway, and Next.js standalone server running locally.
+
+| Profile | Payload | Result |
+| --- | --- | --- |
+| Smoke warm path | `20` tickers, `100000` paths, `252` day horizon, `0.99` confidence | Warm HTTP `128.59 ms`, compute `112.84 ms`, data fetch `10.31 ms`, total gateway round trip `127.45 ms`. |
+| Stable local load | `wrk -t2 -c4 -d20s --timeout 10s --latency` | `10.12 req/s`, average `390.93 ms`, p99 `476.46 ms`, max `495.06 ms`, zero errors. |
+| Python p95/p99 harness | `120` requests, `4` workers, warmed 20-ticker payload | `10.06 req/s`, p50 `391.58 ms`, p95 `470.28 ms`, p99 `570.07 ms`, zero errors. |
+| CPU saturation note | `wrk -t4 -c16 -d20s` | Throughput stayed near `10.16 req/s`; p99 reached `1.98 s` and the client reported timeout pressure with a `2 s` timeout. |
+
+## Local Development
 
 ```bash
 docker compose up --build
 ```
 
-Service defaults:
+| Service | URL |
+| --- | --- |
+| UI | `http://localhost:3000` |
+| Gateway | `http://localhost:8080` |
+| Compute | `http://localhost:8000` |
+| Redis | `localhost:6379` |
 
-- UI: `http://localhost:3000`
-- Gateway: `http://localhost:8080`
-- Compute: `http://localhost:8000`
-- Redis: `localhost:6379`
-
-## Repo Commands
+Repository commands:
 
 ```bash
 make test
@@ -73,33 +132,41 @@ make build
 make integration
 ```
 
-The integration smoke test validates compute/gateway health, runs a 20-ticker stress request twice, asserts warm-path compute latency, and optionally verifies authenticated UI history persistence when these variables are set:
+The integration smoke test validates compute and gateway health, runs a 20-ticker stress request twice, checks warm-path latency, and optionally validates authenticated UI history persistence:
 
 ```bash
-UI_URL=http://localhost:3000
-NEXT_PUBLIC_SUPABASE_URL=...
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
-SUPABASE_TEST_EMAIL=...
-SUPABASE_TEST_PASSWORD=...
-REQUIRE_AUTH_FLOW=1
+UI_URL=http://localhost:3000 \
+NEXT_PUBLIC_SUPABASE_URL=... \
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=... \
+SUPABASE_TEST_EMAIL=... \
+SUPABASE_TEST_PASSWORD=... \
+REQUIRE_AUTH_FLOW=1 \
+python scripts/integration_smoke.py
 ```
 
-## Observability
+## Deployment
 
-The gateway writes structured JSON logs with `compute_ms`, `data_fetch_ms`, and `total_roundtrip_ms` for every stress test. Prometheus metrics are exposed at `/metrics`, including HTTP request counts/durations and stress-test data-fetch, compute, and total round-trip histograms.
+[render.yaml](render.yaml) is the deployment source of truth. It defines:
 
-## Render Deploy
+| Render resource | Visibility | Runtime | Notes |
+| --- | --- | --- | --- |
+| `quant-stress-ui` | Public web service | Docker, Next.js standalone server | Browser entry point and BFF. It reaches the gateway through Render private networking. |
+| `quant-stress-gateway` | Private service | Docker, Go static binary | Market-data orchestration, Redis cache integration, compute proxy, and Prometheus metrics. |
+| `quant-stress-compute` | Private service | Docker, FastAPI/JAX | Fixed-shape simulation worker with startup warmup. |
+| `quant-stress-redis` | Private Redis | Render Redis | Shared historical price-series cache. |
 
-The repository includes [render.yaml](/mnt/slurm_nfs/a6abdulm/projects/quant-stress-engine/render.yaml:1) with private compute/gateway services, Redis, and the public UI service. The UI proxies server-side to the gateway, so browsers do not need direct gateway access.
+The UI is intentionally deployed as a Node server rather than a static export so BFF routes, private gateway proxying, and Supabase cookie authentication run natively.
 
 ## Supabase Setup
 
 1. Create a Supabase project.
-2. Apply every SQL migration under [supabase/migrations](/mnt/slurm_nfs/a6abdulm/projects/quant-stress-engine/supabase/migrations).
-3. Set these UI environment variables:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+2. Apply every SQL migration under [supabase/migrations](supabase/migrations) in filename order.
+3. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` on the UI service.
 4. Enable email/password auth in Supabase Auth.
-5. Add your deployed UI origin to the Supabase redirect URL allowlist, including `/auth/callback`.
+5. Add the deployed UI origin and `/auth/callback` to the Supabase redirect URL allowlist.
 
 Without Supabase variables, the UI runs in guest mode and the stress engine remains available.
+
+## Observability
+
+The gateway emits structured JSON logs with `ticker_count`, `confidence_level`, `horizon_days`, `compute_ms`, `data_fetch_ms`, and `total_roundtrip_ms` for stress requests. Prometheus metrics are exposed at `/metrics` for request counts, request duration, market-data enrichment duration, compute duration, and total gateway round-trip duration.

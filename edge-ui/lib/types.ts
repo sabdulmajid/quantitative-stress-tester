@@ -19,6 +19,22 @@ export type AppUser = {
   email: string | null;
 };
 
+export type ScenarioShock = {
+  id: string;
+  label: string;
+  description: string;
+  drift_multiplier: number;
+  covariance_multiplier: number;
+};
+
+export type RiskContribution = {
+  ticker: SupportedTicker;
+  weight: number;
+  marginal_volatility: number;
+  volatility_contribution: number;
+  contribution_percent: number;
+};
+
 export type StressTestRequest = {
   tickers: SupportedTicker[];
   weights: number[];
@@ -26,6 +42,7 @@ export type StressTestRequest = {
   confidence_level?: ConfidenceLevel;
   risk_free_rate?: number;
   seed?: number;
+  scenario_id?: string;
 };
 
 export type TickerUniverseResponse = {
@@ -35,6 +52,7 @@ export type TickerUniverseResponse = {
   max_portfolio_tickers: number;
   padded_asset_count: number;
   tickers: SupportedTicker[];
+  scenarios: ScenarioShock[];
 };
 
 export type StressTestResponse = {
@@ -52,6 +70,8 @@ export type StressTestResponse = {
   total_roundtrip_ms: number;
   horizon_days: HorizonDays;
   risk_free_rate: number;
+  scenario: ScenarioShock;
+  risk_contributions: RiskContribution[];
   tickers: SupportedTicker[];
   weights: number[];
   mu: number[];
@@ -82,6 +102,8 @@ export type StressRunRecord = {
   weights: number[];
   horizon_days: HorizonDays;
   seed: number;
+  scenario_id: string;
+  scenario_label: string | null;
   confidence_level: ConfidenceLevel;
   risk_free_rate: number;
   expected_return: number;
@@ -97,6 +119,7 @@ export type StressRunRecord = {
   created_at: string;
   provider: string | null;
   range: string | null;
+  risk_contributions: RiskContribution[];
 };
 
 export type StressRunHistoryResponse = {

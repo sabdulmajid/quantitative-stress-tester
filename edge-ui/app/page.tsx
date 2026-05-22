@@ -12,6 +12,7 @@ import {
   runStressTest,
   savePortfolio
 } from "@/lib/api";
+import { buildRunExport, runExportFilename } from "@/lib/export";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { roundWeight } from "@/lib/portfolio";
@@ -20,7 +21,9 @@ import type {
   ConfidenceLevel,
   HorizonDays,
   SavedPortfolio,
+  ScenarioShock,
   StressRunRecord,
+  StressTestRequest,
   StressTestResponse,
   TickerUniverseResponse
 } from "@/lib/types";
@@ -37,14 +40,21 @@ const CorrelationMatrix = dynamic(() => import("@/components/CorrelationMatrix")
 const persistenceEnabled = isSupabaseConfigured();
 const horizonOptions: HorizonDays[] = [1, 10, 252];
 const confidenceOptions: ConfidenceLevel[] = [0.95, 0.99];
+const fallbackScenario: ScenarioShock = {
+  id: "baseline",
+  label: "Baseline",
+  description: "Aligned historical drift and covariance without scenario scaling.",
+  drift_multiplier: 1,
+  covariance_multiplier: 1
+};
 
 function formatElapsed(value: number | undefined) {
-  if (typeof value !== "number" || Number.isNaN(value)) return "—";
+  if (typeof value !== "number" || Number.isNaN(value)) return "N/A";
   return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value)} ms`;
 }
 
 function formatGenericValue(value: number | undefined) {
-  if (typeof value !== "number" || Number.isNaN(value)) return "—";
+  if (typeof value !== "number" || Number.isNaN(value)) return "N/A";
   if (Math.abs(value) < 1 && value !== 0) {
     return `${(value * 100).toFixed(2)}%`;
   }
@@ -54,18 +64,23 @@ function formatGenericValue(value: number | undefined) {
 }
 
 function formatRatio(value: number | undefined) {
-  if (typeof value !== "number" || Number.isNaN(value)) return "—";
+  if (typeof value !== "number" || Number.isNaN(value)) return "N/A";
   return value.toFixed(2);
 }
 
 function formatTimestamp(value: string | undefined) {
-  if (!value) return "—";
+  if (!value) return "N/A";
   const timestamp = new Date(value);
-  if (Number.isNaN(timestamp.valueOf())) return "—";
+  if (Number.isNaN(timestamp.valueOf())) return "N/A";
   return new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(timestamp);
+}
+
+function formatContribution(value: number | undefined) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "N/A";
+  return `${(value * 100).toFixed(1)}%`;
 }
 
 export default function Page() {
@@ -80,6 +95,7 @@ export default function Page() {
   const [confidenceLevel, setConfidenceLevel] = useState<ConfidenceLevel>(0.95);
   const [horizonDays, setHorizonDays] = useState<HorizonDays>(252);
   const [riskFreeRate, setRiskFreeRate] = useState(0.02);
+  const [scenarioId, setScenarioId] = useState(fallbackScenario.id);
   const [tickerUniverse, setTickerUniverse] = useState<TickerUniverseResponse | null>(null);
   const [tickerUniverseError, setTickerUniverseError] = useState<string | null>(null);
   const [loadingTickers, setLoadingTickers] = useState(true);
@@ -218,15 +234,20 @@ export default function Page() {
     await syncAuthState();
   }
 
-  const payload = useMemo(
+  const scenarioOptions = tickerUniverse?.scenarios?.length ? tickerUniverse.scenarios : [fallbackScenario];
+  const selectedScenario =
+    scenarioOptions.find((scenario) => scenario.id === scenarioId) ?? scenarioOptions[0] ?? fallbackScenario;
+
+  const payload = useMemo<StressTestRequest>(
     () => ({
       tickers: selections.map((selection) => selection.ticker),
       weights: selections.map((selection) => roundWeight(selection.weight)),
       horizon_days: horizonDays,
       confidence_level: confidenceLevel,
-      risk_free_rate: riskFreeRate
+      risk_free_rate: riskFreeRate,
+      scenario_id: selectedScenario.id
     }),
-    [confidenceLevel, horizonDays, riskFreeRate, selections]
+    [confidenceLevel, horizonDays, riskFreeRate, selectedScenario.id, selections]
   );
 
   async function handleRun() {
@@ -280,31 +301,49 @@ export default function Page() {
     setHorizonDays(run.horizon_days);
     setConfidenceLevel(run.confidence_level);
     setRiskFreeRate(run.risk_free_rate);
+    setScenarioId(run.scenario_id);
     setPortfolioMessage("Portfolio loaded from run history.");
     setPortfolioError(null);
+  }
+
+  function handleExportRun() {
+    if (!result) return;
+    const exportedAt = new Date().toISOString();
+    const exportPayload = buildRunExport(payload, result, exportedAt);
+    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], {
+      type: "application/json"
+    });
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = runExportFilename(exportedAt);
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
   }
 
   const totalWeight = selections.reduce((sum, item) => sum + item.weight, 0);
   const ready = selections.length > 0 && !loadingTickers && !tickerUniverseError;
   const liveTickerCount = tickerUniverse?.tickers.length ?? 0;
   const maxPortfolioTickers = tickerUniverse?.max_portfolio_tickers ?? 20;
+  const riskContributions = result?.risk_contributions ?? [];
   const cacheMinutes =
     typeof tickerUniverse?.cache_ttl_seconds === "number"
       ? Math.round(tickerUniverse.cache_ttl_seconds / 60)
       : null;
 
   return (
-    <main className="relative min-h-screen overflow-hidden px-4 py-6 text-slate-900 sm:px-6 lg:px-8">
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(20,184,166,0.16),transparent_28%),radial-gradient(circle_at_top_right,rgba(14,165,233,0.14),transparent_28%),linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)]" />
+    <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-900 sm:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-        <section className="rounded-[2rem] border border-white/60 bg-white/74 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.1)] backdrop-blur sm:p-8">
+        <section className="rounded-lg border border-white/60 bg-white p-6 sm:p-8">
           <div className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-end">
             <div className="space-y-5">
-              <div className="inline-flex items-center rounded-full border border-teal-900/10 bg-teal-950/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.28em] text-teal-900/80">
+              <div className="inline-flex items-center rounded-md border border-teal-900/10 bg-teal-950/5 px-3 py-1 text-xs font-semibold uppercase text-teal-900/80">
                 Quant Stress Engine
               </div>
               <div className="space-y-3">
-                <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">
+                <h1 className="max-w-3xl text-3xl font-semibold text-slate-950 sm:text-3xl">
                   Portfolio stress testing with persistence, auth, and a fast path to JAX.
                 </h1>
                 <p className="max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
@@ -314,11 +353,11 @@ export default function Page() {
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
                 {[
-                  [`${liveTickerCount || "—"} tickers`, "Live market universe"],
+                  [`${liveTickerCount || "N/A"} tickers`, "Live market universe"],
                   ["50 bins", "Compact histogram response"],
                   [authUser ? "Signed in" : persistenceEnabled ? "Auth ready" : "Guest mode", authUser?.email ?? "Persistence optional"]
                 ].map(([label, detail]) => (
-                  <div key={label} className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                  <div key={label} className="rounded-lg border border-slate-200 bg-white p-4">
                     <div className="text-sm font-semibold text-slate-950">{label}</div>
                     <div className="mt-1 text-sm leading-6 text-slate-600">{detail}</div>
                   </div>
@@ -326,26 +365,26 @@ export default function Page() {
               </div>
             </div>
 
-            <div className="rounded-[1.75rem] border border-slate-200 bg-slate-950 p-5 text-slate-100 shadow-glow">
+            <div className="rounded-lg border border-slate-200 bg-slate-950 p-5 text-slate-100">
               <div className="flex items-center justify-between text-sm text-slate-300">
                 <span>Gateway route</span>
-                <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-medium text-teal-300">
+                <span className="rounded-md bg-white/10 px-2.5 py-1 text-xs font-medium text-teal-300">
                   Production path
                 </span>
               </div>
               <div className="mt-3 break-all font-mono text-sm text-slate-50">/api/v1/stress-test</div>
               <div className="mt-5 grid gap-3 text-sm">
-                <div className="rounded-2xl bg-white/5 p-4">
+                <div className="rounded-lg bg-white/5 p-4">
                   <div className="text-slate-400">Portfolio weight total</div>
                   <div className="mt-1 text-2xl font-semibold text-white">{formatGenericValue(totalWeight)}%</div>
                 </div>
-                <div className="rounded-2xl bg-white/5 p-4">
+                <div className="rounded-lg bg-white/5 p-4">
                   <div className="text-slate-400">Ticker cache</div>
                   <div className="mt-1 text-2xl font-semibold text-white">
-                    {cacheMinutes === null ? "—" : `${cacheMinutes} min`}
+                    {cacheMinutes === null ? "N/A" : `${cacheMinutes} min`}
                   </div>
                 </div>
-                <div className="rounded-2xl bg-white/5 p-4">
+                <div className="rounded-lg bg-white/5 p-4">
                   <div className="text-slate-400">Saved portfolio</div>
                   <div className="mt-1 text-sm font-semibold text-white">{formatTimestamp(savedPortfolio?.updated_at)}</div>
                 </div>
@@ -369,10 +408,10 @@ export default function Page() {
               maxPortfolioTickers={maxPortfolioTickers}
             />
 
-            <section className="rounded-[2rem] border border-slate-200/80 bg-white/78 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur">
+            <section className="rounded-lg border border-slate-200/80 bg-white p-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                  <h2 className="text-2xl font-semibold tracking-tight text-slate-950">Run summary</h2>
+                  <h2 className="text-2xl font-semibold text-slate-950">Run summary</h2>
                   <p className="mt-1 text-sm leading-6 text-slate-600">
                     Results come directly from the gateway response contract. Authenticated runs are written to history
                     after the response returns.
@@ -381,9 +420,17 @@ export default function Page() {
                 <div className="flex flex-wrap gap-3">
                   <button
                     type="button"
+                    onClick={handleExportRun}
+                    disabled={!result}
+                    className="rounded-md border border-slate-200 bg-white px-5 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                  >
+                    Export run JSON
+                  </button>
+                  <button
+                    type="button"
                     onClick={handleSavePortfolio}
                     disabled={!authUser || portfolioSaving || selections.length === 0}
-                    className="rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                    className="rounded-md border border-slate-200 bg-white px-5 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                   >
                     {portfolioSaving ? "Saving..." : "Save portfolio"}
                   </button>
@@ -391,17 +438,17 @@ export default function Page() {
                     type="button"
                     onClick={handleRun}
                     disabled={!ready || loading}
-                    className="rounded-full bg-slate-950 px-5 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    className="rounded-md bg-slate-950 px-5 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
                   >
                     {loading ? "Running..." : loadingTickers ? "Loading tickers..." : "Run stress test"}
                   </button>
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_1fr_0.9fr]">
-                <div className="rounded-2xl border border-slate-200 bg-white/85 p-4">
+              <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_1fr_0.9fr_1.2fr]">
+                <div className="rounded-lg border border-slate-200 bg-white p-4">
                   <div className="text-sm font-medium text-slate-700">Confidence</div>
-                  <div className="mt-3 grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
+                  <div className="mt-3 grid grid-cols-2 gap-2 rounded-md bg-slate-100 p-1">
                     {confidenceOptions.map((option) => (
                       <button
                         key={option}
@@ -417,9 +464,9 @@ export default function Page() {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white/85 p-4">
+                <div className="rounded-lg border border-slate-200 bg-white p-4">
                   <div className="text-sm font-medium text-slate-700">Horizon</div>
-                  <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl bg-slate-100 p-1">
+                  <div className="mt-3 grid grid-cols-3 gap-2 rounded-md bg-slate-100 p-1">
                     {horizonOptions.map((option) => (
                       <button
                         key={option}
@@ -435,7 +482,7 @@ export default function Page() {
                   </div>
                 </div>
 
-                <label className="rounded-2xl border border-slate-200 bg-white/85 p-4">
+                <label className="rounded-lg border border-slate-200 bg-white p-4">
                   <span className="text-sm font-medium text-slate-700">Risk-free rate</span>
                   <div className="mt-3 flex items-center gap-2">
                     <input
@@ -455,27 +502,46 @@ export default function Page() {
                     <span className="text-sm font-semibold text-slate-500">%</span>
                   </div>
                 </label>
+
+                <label className="rounded-lg border border-slate-200 bg-white p-4">
+                  <span className="text-sm font-medium text-slate-700">Scenario shock</span>
+                  <select
+                    className="field mt-3"
+                    value={selectedScenario.id}
+                    onChange={(event) => setScenarioId(event.target.value)}
+                  >
+                    {scenarioOptions.map((scenario) => (
+                      <option key={scenario.id} value={scenario.id}>
+                        {scenario.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="mt-2 block text-xs leading-5 text-slate-500" title={selectedScenario.description}>
+                    Drift x{selectedScenario.drift_multiplier.toFixed(2)}, covariance x
+                    {selectedScenario.covariance_multiplier.toFixed(2)}
+                  </span>
+                </label>
               </div>
 
               {loading ? (
-                <div className="mt-5 rounded-2xl border border-teal-200 bg-teal-50 p-4">
+                <div className="mt-5 rounded-lg border border-teal-200 bg-teal-50 p-4">
                   <div className="flex items-center justify-between gap-4 text-sm font-medium text-teal-900">
                     <span>Simulating 100,000 paths</span>
                     <span>{Math.round(confidenceLevel * 100)}% VaR</span>
                   </div>
-                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-teal-100">
-                    <div className="simulation-progress h-full rounded-full bg-teal-700" />
+                  <div className="mt-3 h-2 overflow-hidden rounded-md bg-teal-100">
+                    <div className="simulation-progress h-full rounded-md bg-teal-700" />
                   </div>
                 </div>
               ) : null}
 
               {tickerUniverseError ? (
-                <div className="mt-5 flex items-center justify-between rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                <div className="mt-5 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
                   <span>{tickerUniverseError}</span>
                   <button
                     type="button"
                     onClick={handleRetryTickers}
-                    className="ml-4 rounded-full bg-amber-200 px-3 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-300"
+                    className="ml-4 rounded-md bg-amber-200 px-3 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-300"
                   >
                     Retry
                   </button>
@@ -483,45 +549,73 @@ export default function Page() {
               ) : null}
 
               {portfolioMessage ? (
-                <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+                <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
                   {portfolioMessage}
                 </div>
               ) : null}
 
               {portfolioError ? (
-                <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                <div className="mt-5 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
                   {portfolioError}
                 </div>
               ) : null}
 
               {error ? (
-                <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                <div className="mt-5 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
                   {error}
                 </div>
               ) : null}
 
               <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {[
-                  ["Expected return", formatGenericValue(result?.expected_return)],
-                  [`VaR ${Math.round(confidenceLevel * 100)}%`, formatGenericValue(result?.value_at_risk)],
-                  ["CVaR", formatGenericValue(result?.cvar)],
-                  ["Annualized vol", formatGenericValue(result?.annualized_volatility)],
-                  ["Sharpe", formatRatio(result?.sharpe_ratio)],
-                  ["Compute", formatElapsed(result?.elapsed_ms)],
-                  ["Data fetch", formatElapsed(result?.data_fetch_ms)],
-                  ["Gateway round-trip", formatElapsed(result?.total_roundtrip_ms)],
-                  ["Client round-trip", formatElapsed(clientElapsedMs ?? undefined)]
-                ].map(([label, value]) => (
-                  <div key={label} className="rounded-2xl border border-slate-200 bg-white/85 p-4">
-                    <div className="text-sm text-slate-500">{label}</div>
-                    <div className="mt-2 text-xl font-semibold tracking-tight text-slate-950">{value}</div>
+                  {
+                    label: "Expected return",
+                    value: formatGenericValue(result?.expected_return),
+                    help: "Mean simulated portfolio return over the selected horizon."
+                  },
+                  {
+                    label: `VaR ${Math.round(confidenceLevel * 100)}%`,
+                    value: formatGenericValue(result?.value_at_risk),
+                    help: "Value at Risk is the loss threshold exceeded by the selected lower-tail probability."
+                  },
+                  {
+                    label: "CVaR",
+                    value: formatGenericValue(result?.cvar),
+                    help: "Conditional Value at Risk is the average loss inside the selected VaR tail."
+                  },
+                  {
+                    label: "Annualized vol",
+                    value: formatGenericValue(result?.annualized_volatility),
+                    help: "Annualized volatility is the square root of portfolio variance from the scenario covariance matrix."
+                  },
+                  {
+                    label: "Sharpe",
+                    value: formatRatio(result?.sharpe_ratio),
+                    help: "Sharpe ratio is annualized excess return divided by annualized volatility."
+                  },
+                  { label: "Compute", value: formatElapsed(result?.elapsed_ms), help: "JAX simulation time." },
+                  { label: "Data fetch", value: formatElapsed(result?.data_fetch_ms), help: "Gateway market-data time." },
+                  {
+                    label: "Gateway round-trip",
+                    value: formatElapsed(result?.total_roundtrip_ms),
+                    help: "Total gateway request duration."
+                  },
+                  {
+                    label: "Client round-trip",
+                    value: formatElapsed(clientElapsedMs ?? undefined),
+                    help: "Browser-observed request duration."
+                  }
+                ].map((metric) => (
+                  <div key={metric.label} title={metric.help} className="rounded-lg border border-slate-200 bg-white p-4">
+                    <div className="text-sm text-slate-500">{metric.label}</div>
+                    <div className="mt-2 text-xl font-semibold text-slate-950">{metric.value}</div>
                   </div>
                 ))}
               </div>
 
-              <div className="mt-5 rounded-3xl bg-slate-950 p-4 text-slate-100">
+              <div className="mt-5 rounded-lg bg-slate-950 p-4 text-slate-100">
                 <div className="text-sm text-slate-400">Payload sent to gateway</div>
-                <pre className="mt-3 overflow-x-auto rounded-2xl bg-white/5 p-4 text-xs leading-6 text-slate-100">
+                <pre className="mt-3 overflow-x-auto rounded-lg bg-white/5 p-4 text-xs leading-6 text-slate-100">
 {JSON.stringify(payload, null, 2)}
                 </pre>
               </div>
@@ -536,6 +630,43 @@ export default function Page() {
               loading={loading}
             />
 
+            <section className="rounded-lg border border-white/60 bg-white p-6">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase text-teal-800/70">Risk attribution</p>
+                  <h2 className="mt-2 text-2xl font-semibold text-slate-950">Volatility contribution</h2>
+                </div>
+                <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                  {result ? result.scenario.label : selectedScenario.label}
+                </div>
+              </div>
+
+              {riskContributions.length ? (
+                <div className="mt-5 space-y-3">
+                  {riskContributions.map((contribution) => (
+                    <div key={contribution.ticker} className="grid gap-2 sm:grid-cols-[72px_1fr_72px] sm:items-center">
+                      <div className="text-sm font-semibold text-slate-950">{contribution.ticker}</div>
+                      <div className="h-2 overflow-hidden rounded-md bg-slate-100">
+                        <div
+                          className="h-full rounded-md bg-teal-700"
+                          style={{
+                            width: `${Math.max(0, Math.min(100, contribution.contribution_percent * 100))}%`
+                          }}
+                        />
+                      </div>
+                      <div className="text-right text-sm font-semibold text-slate-700">
+                        {formatContribution(contribution.contribution_percent)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-5 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-500">
+                  Run a simulation to populate per-asset volatility contribution.
+                </div>
+              )}
+            </section>
+
             <CorrelationMatrix
               tickers={result?.tickers ?? []}
               correlationMatrix={result?.correlation_matrix ?? []}
@@ -549,11 +680,14 @@ export default function Page() {
               onLoadPortfolio={handleLoadPortfolio}
             />
 
-            <section className="rounded-[2rem] border border-slate-200/80 bg-white/78 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur">
-              <h2 className="text-2xl font-semibold tracking-tight text-slate-950">Response contract</h2>
+            <section className="rounded-lg border border-slate-200/80 bg-white p-6">
+              <h2 className="text-2xl font-semibold text-slate-950">Response contract</h2>
               <p className="mt-1 text-sm leading-6 text-slate-600">
                 The gateway returns VaR, CVaR, annualized volatility, Sharpe, timing telemetry, covariance, and
                 correlation data for the selected portfolio.
+              </p>
+              <p className="mt-3 text-sm leading-6 text-slate-600">
+                Scenario shocks are applied in the gateway before padding the unchanged 50-asset compute payload.
               </p>
               <p className="mt-3 text-sm leading-6 text-slate-600">
                 When Supabase is configured, the app uses cookie-backed sessions for auth and stores one saved portfolio

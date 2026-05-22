@@ -238,9 +238,82 @@ func TestStressTestForwardsNormalizedPayload(t *testing.T) {
 	if got := respBody["sharpe_ratio"]; got != float64(0.54) {
 		t.Fatalf("unexpected sharpe_ratio: %v", got)
 	}
+	scenario, ok := respBody["scenario"].(map[string]interface{})
+	if !ok || scenario["id"] != "baseline" {
+		t.Fatalf("unexpected scenario: %#v", respBody["scenario"])
+	}
+	contributions, ok := respBody["risk_contributions"].([]interface{})
+	if !ok || len(contributions) != 2 {
+		t.Fatalf("unexpected risk contributions: %#v", respBody["risk_contributions"])
+	}
 	correlation, ok := respBody["correlation_matrix"].([]interface{})
 	if !ok || len(correlation) != 2 {
 		t.Fatalf("unexpected correlation matrix: %#v", respBody["correlation_matrix"])
+	}
+}
+
+func TestStressTestAppliesScenarioShock(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload computeRequest
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode upstream payload: %v", err)
+		}
+
+		if got, want := payload.PaddedMu[0], -0.125; got < want-1e-12 || got > want+1e-12 {
+			t.Fatalf("unexpected scenario-adjusted mu: %v", got)
+		}
+		if got, want := payload.PaddedCov[0][0], 0.48; got < want-1e-12 || got > want+1e-12 {
+			t.Fatalf("unexpected scenario-adjusted covariance: %v", got)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"var_95":0.2,"var_99":0.31,"value_at_risk":0.31,"cvar":0.36,"annualized_volatility":0.52,"sharpe_ratio":-0.71,"confidence_level":0.99,"expected_return":-0.11,"histogram":[],"elapsed_ms":9}`))
+	}))
+	defer upstream.Close()
+
+	srv := New(Config{
+		ComputeEngineURL: upstream.URL,
+		HTTPClient:       upstream.Client(),
+		MarketData: stubMarketDataProvider{
+			supported: map[string]struct{}{
+				"AAPL": {},
+				"MSFT": {},
+			},
+			mu: []float64{0.10, 0.08},
+			cov: [][]float64{
+				{0.20, 0.04},
+				{0.04, 0.16},
+			},
+		},
+	})
+
+	reqBody := `{"tickers":["AAPL","MSFT"],"weights":[50,50],"confidence_level":0.99,"scenario_id":"financial_crisis_2008"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/stress-test", bytes.NewBufferString(reqBody))
+	rr := httptest.NewRecorder()
+
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d", rr.Code)
+	}
+
+	var body stressTestResponse
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Scenario.ID != "financial_crisis_2008" {
+		t.Fatalf("unexpected scenario: %#v", body.Scenario)
+	}
+	if len(body.RiskContributions) != 2 {
+		t.Fatalf("unexpected risk contributions: %#v", body.RiskContributions)
+	}
+	totalContribution := 0.0
+	for _, contribution := range body.RiskContributions {
+		totalContribution += contribution.ContributionPercent
+	}
+	if totalContribution < 0.999999 || totalContribution > 1.000001 {
+		t.Fatalf("risk contribution percentages should sum to one, got %v", totalContribution)
 	}
 }
 
@@ -304,5 +377,8 @@ func TestSupportedTickers(t *testing.T) {
 	}
 	if len(body.Tickers) != 5 {
 		t.Fatalf("unexpected tickers: %#v", body.Tickers)
+	}
+	if len(body.Scenarios) != len(macroScenarios) {
+		t.Fatalf("unexpected scenarios: %#v", body.Scenarios)
 	}
 }

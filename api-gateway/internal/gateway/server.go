@@ -31,6 +31,30 @@ const (
 	defaultRiskFreeRate = 0.0
 )
 
+var macroScenarios = []macroScenario{
+	{
+		ID:                   "baseline",
+		Label:                "Baseline",
+		Description:          "Aligned historical drift and covariance without scenario scaling.",
+		DriftMultiplier:      1.0,
+		CovarianceMultiplier: 1.0,
+	},
+	{
+		ID:                   "financial_crisis_2008",
+		Label:                "2008 Financial Crisis",
+		Description:          "Severe risk-off regime with negative drift pressure and elevated cross-asset variance.",
+		DriftMultiplier:      -1.25,
+		CovarianceMultiplier: 2.40,
+	},
+	{
+		ID:                   "liquidity_shock_2020",
+		Label:                "2020 Liquidity Shock",
+		Description:          "Short-horizon liquidity stress with compressed expected returns and amplified covariance.",
+		DriftMultiplier:      -0.75,
+		CovarianceMultiplier: 3.10,
+	},
+}
+
 var (
 	httpRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -92,12 +116,13 @@ type Server struct {
 }
 
 type supportedTickersResponse struct {
-	Provider            string   `json:"provider"`
-	Range               string   `json:"range"`
-	CacheTTLSeconds     int64    `json:"cache_ttl_seconds"`
-	MaxPortfolioTickers int      `json:"max_portfolio_tickers"`
-	PaddedAssetCount    int      `json:"padded_asset_count"`
-	Tickers             []string `json:"tickers"`
+	Provider            string          `json:"provider"`
+	Range               string          `json:"range"`
+	CacheTTLSeconds     int64           `json:"cache_ttl_seconds"`
+	MaxPortfolioTickers int             `json:"max_portfolio_tickers"`
+	PaddedAssetCount    int             `json:"padded_asset_count"`
+	Tickers             []string        `json:"tickers"`
+	Scenarios           []macroScenario `json:"scenarios"`
 }
 
 type stressTestRequest struct {
@@ -107,6 +132,7 @@ type stressTestRequest struct {
 	ConfidenceLevel *float64  `json:"confidence_level,omitempty"`
 	RiskFreeRate    *float64  `json:"risk_free_rate,omitempty"`
 	Seed            *int64    `json:"seed,omitempty"`
+	ScenarioID      *string   `json:"scenario_id,omitempty"`
 }
 
 type computeRequest struct {
@@ -126,6 +152,22 @@ type histogramBin struct {
 	Frequency int     `json:"frequency"`
 }
 
+type macroScenario struct {
+	ID                   string  `json:"id"`
+	Label                string  `json:"label"`
+	Description          string  `json:"description"`
+	DriftMultiplier      float64 `json:"drift_multiplier"`
+	CovarianceMultiplier float64 `json:"covariance_multiplier"`
+}
+
+type riskContribution struct {
+	Ticker                 string  `json:"ticker"`
+	Weight                 float64 `json:"weight"`
+	MarginalVolatility     float64 `json:"marginal_volatility"`
+	VolatilityContribution float64 `json:"volatility_contribution"`
+	ContributionPercent    float64 `json:"contribution_percent"`
+}
+
 type computeResponse struct {
 	ExpectedReturn       float64        `json:"expected_return"`
 	Var95                float64        `json:"var_95"`
@@ -141,17 +183,19 @@ type computeResponse struct {
 
 type stressTestResponse struct {
 	computeResponse
-	Provider          string      `json:"provider"`
-	Range             string      `json:"range"`
-	Tickers           []string    `json:"tickers"`
-	Weights           []float64   `json:"weights"`
-	HorizonDays       int         `json:"horizon_days"`
-	RiskFreeRate      float64     `json:"risk_free_rate"`
-	DataFetchMS       float64     `json:"data_fetch_ms"`
-	TotalRoundtripMS  float64     `json:"total_roundtrip_ms"`
-	Mu                []float64   `json:"mu"`
-	CovarianceMatrix  [][]float64 `json:"covariance_matrix"`
-	CorrelationMatrix [][]float64 `json:"correlation_matrix"`
+	Provider          string             `json:"provider"`
+	Range             string             `json:"range"`
+	Tickers           []string           `json:"tickers"`
+	Weights           []float64          `json:"weights"`
+	HorizonDays       int                `json:"horizon_days"`
+	RiskFreeRate      float64            `json:"risk_free_rate"`
+	Scenario          macroScenario      `json:"scenario"`
+	RiskContributions []riskContribution `json:"risk_contributions"`
+	DataFetchMS       float64            `json:"data_fetch_ms"`
+	TotalRoundtripMS  float64            `json:"total_roundtrip_ms"`
+	Mu                []float64          `json:"mu"`
+	CovarianceMatrix  [][]float64        `json:"covariance_matrix"`
+	CorrelationMatrix [][]float64        `json:"correlation_matrix"`
 }
 
 type validatedRequest struct {
@@ -161,6 +205,7 @@ type validatedRequest struct {
 	confidenceLevel float64
 	riskFreeRate    float64
 	seed            int64
+	scenario        macroScenario
 }
 
 type computePayloadBundle struct {
@@ -237,6 +282,7 @@ func (s *Server) handleSupportedTickers(w http.ResponseWriter, r *http.Request) 
 		MaxPortfolioTickers: maxPortfolioTickers,
 		PaddedAssetCount:    paddedSize,
 		Tickers:             s.marketData.SupportedTickers(),
+		Scenarios:           supportedScenarios(),
 	})
 }
 
@@ -303,6 +349,8 @@ func (s *Server) handleStressTest(w http.ResponseWriter, r *http.Request) {
 		Weights:           validated.weights,
 		HorizonDays:       validated.horizonDays,
 		RiskFreeRate:      validated.riskFreeRate,
+		Scenario:          validated.scenario,
+		RiskContributions: computeRiskContributions(validated.tickers, validated.weights, bundle.inputs.Covariance),
 		DataFetchMS:       dataFetchMS,
 		TotalRoundtripMS:  totalRoundtripMS,
 		Mu:                cloneFloat64s(bundle.inputs.Mu),
@@ -370,6 +418,15 @@ func (s *Server) validateRequest(req stressTestRequest) (validatedRequest, error
 		seed = *req.Seed
 	}
 
+	scenario := macroScenarios[0]
+	if req.ScenarioID != nil {
+		selectedScenario, ok := findScenario(*req.ScenarioID)
+		if !ok {
+			return validatedRequest{}, fmt.Errorf("scenario_id must be one of %s", supportedScenarioIDs())
+		}
+		scenario = selectedScenario
+	}
+
 	return validatedRequest{
 		tickers:         normalizedTickers,
 		weights:         normalizedWeights,
@@ -377,6 +434,7 @@ func (s *Server) validateRequest(req stressTestRequest) (validatedRequest, error
 		confidenceLevel: confidenceLevel,
 		riskFreeRate:    riskFreeRate,
 		seed:            seed,
+		scenario:        scenario,
 	}, nil
 }
 
@@ -385,11 +443,12 @@ func (s *Server) buildComputePayload(ctx context.Context, req validatedRequest) 
 	if err != nil {
 		return computePayloadBundle{}, err
 	}
+	scenarioInputs := applyScenarioShock(inputs, req.scenario)
 
 	payload := computeRequest{
 		PaddedWeights:   padVector(req.weights, paddedSize),
-		PaddedMu:        padVector(inputs.Mu, paddedSize),
-		PaddedCov:       padMatrix(inputs.Covariance, paddedSize),
+		PaddedMu:        padVector(scenarioInputs.Mu, paddedSize),
+		PaddedCov:       padMatrix(scenarioInputs.Covariance, paddedSize),
 		NumPaths:        defaultNumPaths,
 		HorizonDays:     req.horizonDays,
 		ConfidenceLevel: req.confidenceLevel,
@@ -402,7 +461,7 @@ func (s *Server) buildComputePayload(ctx context.Context, req validatedRequest) 
 		return computePayloadBundle{}, err
 	}
 
-	return computePayloadBundle{body: body, inputs: inputs}, nil
+	return computePayloadBundle{body: body, inputs: scenarioInputs}, nil
 }
 
 func (s *Server) proxyToCompute(ctx context.Context, payload []byte) (*http.Response, error) {
@@ -484,6 +543,86 @@ func cloneMatrix(values [][]float64) [][]float64 {
 		out[i] = cloneFloat64s(values[i])
 	}
 	return out
+}
+
+func supportedScenarios() []macroScenario {
+	out := make([]macroScenario, len(macroScenarios))
+	copy(out, macroScenarios)
+	return out
+}
+
+func findScenario(raw string) (macroScenario, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	for _, scenario := range macroScenarios {
+		if scenario.ID == normalized {
+			return scenario, true
+		}
+	}
+	return macroScenario{}, false
+}
+
+func supportedScenarioIDs() string {
+	ids := make([]string, len(macroScenarios))
+	for index, scenario := range macroScenarios {
+		ids[index] = scenario.ID
+	}
+	return strings.Join(ids, ", ")
+}
+
+func applyScenarioShock(inputs marketInputs, scenario macroScenario) marketInputs {
+	mu := make([]float64, len(inputs.Mu))
+	for index, value := range inputs.Mu {
+		mu[index] = value * scenario.DriftMultiplier
+	}
+
+	covariance := cloneMatrix(inputs.Covariance)
+	for i := range covariance {
+		for j := range covariance[i] {
+			covariance[i][j] *= scenario.CovarianceMultiplier
+		}
+	}
+
+	return marketInputs{Mu: mu, Covariance: covariance}
+}
+
+func computeRiskContributions(tickers []string, weights []float64, covariance [][]float64) []riskContribution {
+	contributions := make([]riskContribution, len(tickers))
+	if len(tickers) == 0 || len(weights) != len(tickers) || len(covariance) < len(tickers) {
+		return contributions
+	}
+
+	sigmaWeight := make([]float64, len(tickers))
+	for i := range tickers {
+		if len(covariance[i]) < len(tickers) {
+			return contributions
+		}
+		for j := range tickers {
+			sigmaWeight[i] += covariance[i][j] * weights[j]
+		}
+	}
+
+	portfolioVariance := 0.0
+	for i := range tickers {
+		portfolioVariance += weights[i] * sigmaWeight[i]
+	}
+	portfolioVolatility := math.Sqrt(math.Max(portfolioVariance, 0))
+
+	for i, ticker := range tickers {
+		contributions[i] = riskContribution{
+			Ticker: ticker,
+			Weight: weights[i],
+		}
+		if portfolioVolatility <= 1e-12 {
+			continue
+		}
+		marginal := sigmaWeight[i] / portfolioVolatility
+		volContribution := weights[i] * marginal
+		contributions[i].MarginalVolatility = marginal
+		contributions[i].VolatilityContribution = volContribution
+		contributions[i].ContributionPercent = volContribution / portfolioVolatility
+	}
+
+	return contributions
 }
 
 func covarianceToCorrelation(covariance [][]float64) [][]float64 {
