@@ -7,6 +7,7 @@ from app.models.stress import DEFAULT_PATHS, HISTOGRAM_BINS, MAX_ASSETS
 
 
 _DIAGONAL_JITTER = 1e-6
+_ACTIVE_ASSETS = 20
 
 
 def _single_path_portfolio_return(
@@ -32,21 +33,25 @@ def simulate_portfolio_gbm(
     horizon: int = 252,
     seed: int = 42,
 ) -> jax.Array:
-    safe_cov = padded_cov + jnp.eye(MAX_ASSETS, dtype=jnp.float32) * _DIAGONAL_JITTER
+    active_weights = padded_weights[:_ACTIVE_ASSETS]
+    active_mu = padded_mu[:_ACTIVE_ASSETS]
+    active_cov = padded_cov[:_ACTIVE_ASSETS, :_ACTIVE_ASSETS]
+
+    safe_cov = active_cov + jnp.eye(_ACTIVE_ASSETS, dtype=jnp.float32) * _DIAGONAL_JITTER
     cholesky = jnp.linalg.cholesky(safe_cov)
     variances = jnp.diag(safe_cov)
     horizon_years = jnp.asarray(horizon / 252.0, dtype=jnp.float32)
 
     random_draws = jax.random.normal(
         jax.random.PRNGKey(seed),
-        shape=(num_paths, MAX_ASSETS),
+        shape=(num_paths, _ACTIVE_ASSETS),
         dtype=jnp.float32,
     )
 
     return jax.vmap(
         _single_path_portfolio_return,
         in_axes=(0, None, None, None, None, None),
-    )(random_draws, padded_weights, padded_mu, cholesky, variances, horizon_years)
+    )(random_draws, active_weights, active_mu, cholesky, variances, horizon_years)
 
 
 def summarize_portfolio_returns(
