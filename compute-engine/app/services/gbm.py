@@ -7,19 +7,17 @@ from app.models.stress import DEFAULT_PATHS, HISTOGRAM_BINS, MAX_ASSETS
 
 
 _DIAGONAL_JITTER = 1e-6
-_ACTIVE_ASSETS = 20
 
 
 def _single_path_portfolio_return(
-    random_draws: jax.Array,
+    correlated_draws: jax.Array,
     padded_weights: jax.Array,
     padded_mu: jax.Array,
-    cholesky: jax.Array,
     variances: jax.Array,
     horizon_years: jax.Array,
 ) -> jax.Array:
     drift = (padded_mu - 0.5 * variances) * horizon_years
-    diffusion = jnp.sqrt(horizon_years) * (cholesky @ random_draws)
+    diffusion = jnp.sqrt(horizon_years) * correlated_draws
     terminal_growth = jnp.exp(drift + diffusion)
     return jnp.dot(padded_weights, terminal_growth - 1.0)
 
@@ -33,25 +31,22 @@ def simulate_portfolio_gbm(
     horizon: int = 252,
     seed: int = 42,
 ) -> jax.Array:
-    active_weights = padded_weights[:_ACTIVE_ASSETS]
-    active_mu = padded_mu[:_ACTIVE_ASSETS]
-    active_cov = padded_cov[:_ACTIVE_ASSETS, :_ACTIVE_ASSETS]
-
-    safe_cov = active_cov + jnp.eye(_ACTIVE_ASSETS, dtype=jnp.float32) * _DIAGONAL_JITTER
+    safe_cov = padded_cov + jnp.eye(MAX_ASSETS, dtype=jnp.float32) * _DIAGONAL_JITTER
     cholesky = jnp.linalg.cholesky(safe_cov)
     variances = jnp.diag(safe_cov)
     horizon_years = jnp.asarray(horizon / 252.0, dtype=jnp.float32)
 
     random_draws = jax.random.normal(
         jax.random.PRNGKey(seed),
-        shape=(num_paths, _ACTIVE_ASSETS),
+        shape=(MAX_ASSETS, num_paths),
         dtype=jnp.float32,
     )
+    correlated_draws = (cholesky @ random_draws).T
 
     return jax.vmap(
         _single_path_portfolio_return,
-        in_axes=(0, None, None, None, None, None),
-    )(random_draws, active_weights, active_mu, cholesky, variances, horizon_years)
+        in_axes=(0, None, None, None, None),
+    )(correlated_draws, padded_weights, padded_mu, variances, horizon_years)
 
 
 def summarize_portfolio_returns(

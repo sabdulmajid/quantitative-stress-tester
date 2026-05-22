@@ -44,3 +44,21 @@ def test_gbm_engine_uses_fixed_shape_padding() -> None:
     )
     assert annualized_volatility > 0
     assert math.isfinite(sharpe_ratio)
+
+
+def test_gbm_engine_executes_full_padded_dimension() -> None:
+    padded_weights = jnp.zeros((MAX_ASSETS,), dtype=jnp.float32).at[MAX_ASSETS - 1].set(1.0)
+    padded_mu = jnp.zeros((MAX_ASSETS,), dtype=jnp.float32).at[MAX_ASSETS - 1].set(0.08)
+    padded_cov = jnp.zeros((MAX_ASSETS, MAX_ASSETS), dtype=jnp.float32)
+    padded_cov = padded_cov.at[MAX_ASSETS - 1, MAX_ASSETS - 1].set(0.04)
+
+    portfolio_returns = simulate_portfolio_gbm(
+        padded_weights=padded_weights,
+        padded_mu=padded_mu,
+        padded_cov=padded_cov,
+        num_paths=DEFAULT_PATHS,
+        horizon=252,
+        seed=29,
+    )
+
+    assert float(jnp.std(portfolio_returns)) > 0.01
