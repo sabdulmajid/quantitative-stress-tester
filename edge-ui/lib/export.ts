@@ -92,3 +92,48 @@ export function buildRunExport(
 export function runExportFilename(exportedAt = new Date().toISOString()) {
   return `quant-stress-run-${exportedAt.replace(/[:.]/g, "-")}.json`;
 }
+
+function csvCell(value: string | number | null | undefined) {
+  const text = value === null || value === undefined ? "" : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+export function buildRunExportCsv(exportPayload: StressRunExport) {
+  const rows: Array<Array<string | number | null | undefined>> = [
+    ["section", "name", "value"],
+    ["metadata", "schema_version", exportPayload.schema_version],
+    ["metadata", "exported_at", exportPayload.exported_at],
+    ["metadata", "provider", exportPayload.metadata.provider],
+    ["metadata", "range", exportPayload.metadata.range],
+    ["request", "tickers", exportPayload.request.tickers.join(" ")],
+    ["request", "weights", exportPayload.request.weights.join(" ")],
+    ["request", "horizon_days", exportPayload.request.horizon_days],
+    ["request", "confidence_level", exportPayload.request.confidence_level],
+    ["request", "risk_free_rate", exportPayload.request.risk_free_rate],
+    ["scenario", "id", exportPayload.scenario.id],
+    ["scenario", "label", exportPayload.scenario.label],
+    ["scenario", "drift_multiplier", exportPayload.scenario.drift_multiplier],
+    ["scenario", "covariance_multiplier", exportPayload.scenario.covariance_multiplier],
+    ["metrics", "expected_return", exportPayload.risk_metrics.expected_return],
+    ["metrics", "var_95", exportPayload.risk_metrics.var_95],
+    ["metrics", "var_99", exportPayload.risk_metrics.var_99],
+    ["metrics", "value_at_risk", exportPayload.risk_metrics.value_at_risk],
+    ["metrics", "cvar", exportPayload.risk_metrics.cvar],
+    ["metrics", "annualized_volatility", exportPayload.risk_metrics.annualized_volatility],
+    ["metrics", "sharpe_ratio", exportPayload.risk_metrics.sharpe_ratio],
+    ["timings_ms", "compute", exportPayload.timings_ms.compute],
+    ["timings_ms", "data_fetch", exportPayload.timings_ms.data_fetch],
+    ["timings_ms", "gateway_roundtrip", exportPayload.timings_ms.gateway_roundtrip],
+    ["inputs", "mu", exportPayload.inputs.mu.join(" ")],
+    ["inputs", "covariance_matrix", JSON.stringify(exportPayload.inputs.covariance_matrix)],
+    ["inputs", "correlation_matrix", JSON.stringify(exportPayload.inputs.correlation_matrix)],
+    ["risk_attribution", "rows", JSON.stringify(exportPayload.risk_contributions)],
+    ["histogram", "bins", JSON.stringify(exportPayload.histogram)]
+  ];
+
+  return `${rows.map((row) => row.map(csvCell).join(",")).join("\n")}\n`;
+}
+
+export function runExportCsvFilename(exportedAt = new Date().toISOString()) {
+  return `quant-stress-run-${exportedAt.replace(/[:.]/g, "-")}.csv`;
+}

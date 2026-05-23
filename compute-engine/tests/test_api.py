@@ -36,6 +36,13 @@ def test_health_endpoint() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_root_endpoint() -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.json()["service"] == "quant-stress-compute"
+    assert response.json()["status"] == "ok"
+
+
 def test_simulate_endpoint_returns_summary_only() -> None:
     response = client.post("/simulate", json=build_payload())
     assert response.status_code == 200

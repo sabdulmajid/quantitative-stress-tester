@@ -340,6 +340,33 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+func TestRoot(t *testing.T) {
+	srv := New(Config{
+		MarketData: stubMarketDataProvider{
+			supported: map[string]struct{}{
+				"AAPL": {},
+			},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d", rr.Code)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["service"] != "quant-stress-gateway" || body["status"] != "ok" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestSupportedTickers(t *testing.T) {
 	srv := New(Config{
 		MarketData: stubMarketDataProvider{

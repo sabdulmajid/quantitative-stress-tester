@@ -12,7 +12,7 @@ import {
   runStressTest,
   savePortfolio
 } from "@/lib/api";
-import { buildRunExport, runExportFilename } from "@/lib/export";
+import { buildRunExport, buildRunExportCsv, runExportCsvFilename, runExportFilename } from "@/lib/export";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { roundWeight } from "@/lib/portfolio";
@@ -46,6 +46,36 @@ const fallbackScenario: ScenarioShock = {
   description: "Aligned historical drift and covariance without scenario scaling.",
   drift_multiplier: 1,
   covariance_multiplier: 1
+};
+const fallbackTickerUniverse: TickerUniverseResponse = {
+  provider: "Fallback universe",
+  range: "cached",
+  cache_ttl_seconds: 21600,
+  max_portfolio_tickers: 20,
+  padded_asset_count: 50,
+  tickers: [
+    "AAPL",
+    "AMZN",
+    "GLD",
+    "GOOGL",
+    "IWM",
+    "JNJ",
+    "JPM",
+    "META",
+    "MSFT",
+    "NFLX",
+    "NVDA",
+    "PG",
+    "QQQ",
+    "SPY",
+    "TSLA",
+    "UNH",
+    "V",
+    "VTI",
+    "XLE",
+    "XLF"
+  ],
+  scenarios: [fallbackScenario]
 };
 
 function formatElapsed(value: number | undefined) {
@@ -123,9 +153,13 @@ export default function Page() {
         syncSupportedTickers(response.tickers);
       } catch (tickerError) {
         if (!active) return;
-        setTickerUniverse(null);
-        setTickerUniverseError(tickerError instanceof Error ? tickerError.message : "Unable to load ticker universe");
-        syncSupportedTickers([]);
+        setTickerUniverse(fallbackTickerUniverse);
+        setTickerUniverseError(
+          tickerError instanceof Error
+            ? `Live ticker discovery failed: ${tickerError.message}`
+            : "Live ticker discovery failed"
+        );
+        syncSupportedTickers(fallbackTickerUniverse.tickers);
       } finally {
         if (active) {
           setLoadingTickers(false);
@@ -306,25 +340,33 @@ export default function Page() {
     setPortfolioError(null);
   }
 
-  function handleExportRun() {
-    if (!result) return;
-    const exportedAt = new Date().toISOString();
-    const exportPayload = buildRunExport(payload, result, exportedAt);
-    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], {
-      type: "application/json"
+  function downloadText(filename: string, text: string, type: string) {
+    const blob = new Blob([text], {
+      type
     });
     const objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = objectUrl;
-    anchor.download = runExportFilename(exportedAt);
+    anchor.download = filename;
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(objectUrl);
   }
 
+  function handleExportRun(format: "json" | "csv") {
+    if (!result) return;
+    const exportedAt = new Date().toISOString();
+    const exportPayload = buildRunExport(payload, result, exportedAt);
+    if (format === "json") {
+      downloadText(runExportFilename(exportedAt), JSON.stringify(exportPayload, null, 2), "application/json");
+      return;
+    }
+    downloadText(runExportCsvFilename(exportedAt), buildRunExportCsv(exportPayload), "text/csv");
+  }
+
   const totalWeight = selections.reduce((sum, item) => sum + item.weight, 0);
-  const ready = selections.length > 0 && !loadingTickers && !tickerUniverseError;
+  const ready = selections.length > 0 && !loadingTickers;
   const liveTickerCount = tickerUniverse?.tickers.length ?? 0;
   const maxPortfolioTickers = tickerUniverse?.max_portfolio_tickers ?? 20;
   const riskContributions = result?.risk_contributions ?? [];
@@ -334,21 +376,21 @@ export default function Page() {
       : null;
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-900 sm:px-6 lg:px-8">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-        <section className="rounded-lg border border-white/60 bg-white p-6 sm:p-8">
-          <div className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-end">
+    <main className="min-h-screen bg-[#f6f7fb] px-4 py-5 text-slate-900 sm:px-6 lg:px-8">
+      <div className="mx-auto flex w-full max-w-[1480px] flex-col gap-5">
+        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-stretch">
             <div className="space-y-5">
-              <div className="inline-flex items-center rounded-md border border-teal-900/10 bg-teal-950/5 px-3 py-1 text-xs font-semibold uppercase text-teal-900/80">
-                Quant Stress Engine
+              <div className="inline-flex items-center rounded-md border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-semibold uppercase text-teal-900">
+                Live risk console
               </div>
               <div className="space-y-3">
-                <h1 className="max-w-3xl text-3xl font-semibold text-slate-950 sm:text-3xl">
-                  Portfolio stress testing with persistence, auth, and a fast path to JAX.
+                <h1 className="max-w-3xl text-3xl font-semibold text-slate-950 sm:text-4xl">
+                  Quant Stress Engine
                 </h1>
                 <p className="max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-                  Configure the portfolio, run the stress engine, and optionally sign in to save your portfolio and
-                  every authenticated simulation run.
+                  Configure a portfolio, run the live gateway path, and inspect risk, timing, attribution, scenario,
+                  and matrix outputs from one focused workspace.
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
@@ -357,7 +399,7 @@ export default function Page() {
                   ["50 bins", "Compact histogram response"],
                   [authUser ? "Signed in" : persistenceEnabled ? "Auth ready" : "Guest mode", authUser?.email ?? "Persistence optional"]
                 ].map(([label, detail]) => (
-                  <div key={label} className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                     <div className="text-sm font-semibold text-slate-950">{label}</div>
                     <div className="mt-1 text-sm leading-6 text-slate-600">{detail}</div>
                   </div>
@@ -365,28 +407,30 @@ export default function Page() {
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 bg-slate-950 p-5 text-slate-100">
-              <div className="flex items-center justify-between text-sm text-slate-300">
-                <span>Gateway route</span>
-                <span className="rounded-md bg-white/10 px-2.5 py-1 text-xs font-medium text-teal-300">
-                  Production path
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-5">
+              <div className="flex items-center justify-between gap-4 border-b border-slate-200 pb-4 text-sm text-slate-600">
+                <span className="font-semibold text-slate-950">Production path</span>
+                <span className="rounded-md bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                  Health checked
                 </span>
               </div>
-              <div className="mt-3 break-all font-mono text-sm text-slate-50">/api/v1/stress-test</div>
+              <div className="mt-4 break-all font-mono text-sm text-slate-700">
+                {"UI BFF -> Go gateway -> JAX worker"}
+              </div>
               <div className="mt-5 grid gap-3 text-sm">
-                <div className="rounded-lg bg-white/5 p-4">
-                  <div className="text-slate-400">Portfolio weight total</div>
-                  <div className="mt-1 text-2xl font-semibold text-white">{formatGenericValue(totalWeight)}%</div>
+                <div className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="text-slate-500">Portfolio weight total</div>
+                  <div className="mt-1 text-2xl font-semibold text-slate-950">{formatGenericValue(totalWeight)}%</div>
                 </div>
-                <div className="rounded-lg bg-white/5 p-4">
-                  <div className="text-slate-400">Ticker cache</div>
-                  <div className="mt-1 text-2xl font-semibold text-white">
+                <div className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="text-slate-500">Ticker cache</div>
+                  <div className="mt-1 text-2xl font-semibold text-slate-950">
                     {cacheMinutes === null ? "N/A" : `${cacheMinutes} min`}
                   </div>
                 </div>
-                <div className="rounded-lg bg-white/5 p-4">
-                  <div className="text-slate-400">Saved portfolio</div>
-                  <div className="mt-1 text-sm font-semibold text-white">{formatTimestamp(savedPortfolio?.updated_at)}</div>
+                <div className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="text-slate-500">Saved portfolio</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-950">{formatTimestamp(savedPortfolio?.updated_at)}</div>
                 </div>
               </div>
             </div>
@@ -420,11 +464,19 @@ export default function Page() {
                 <div className="flex flex-wrap gap-3">
                   <button
                     type="button"
-                    onClick={handleExportRun}
+                    onClick={() => handleExportRun("json")}
                     disabled={!result}
                     className="rounded-md border border-slate-200 bg-white px-5 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                   >
-                    Export run JSON
+                    Export JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExportRun("csv")}
+                    disabled={!result}
+                    className="rounded-md border border-slate-200 bg-white px-5 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                  >
+                    Export CSV
                   </button>
                   <button
                     type="button"
@@ -537,7 +589,7 @@ export default function Page() {
 
               {tickerUniverseError ? (
                 <div className="mt-5 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                  <span>{tickerUniverseError}</span>
+                  <span>{tickerUniverseError}. A fallback ticker list is active so the console remains usable.</span>
                   <button
                     type="button"
                     onClick={handleRetryTickers}
@@ -613,11 +665,28 @@ export default function Page() {
                 ))}
               </div>
 
-              <div className="mt-5 rounded-lg bg-slate-950 p-4 text-slate-100">
-                <div className="text-sm text-slate-400">Payload sent to gateway</div>
-                <pre className="mt-3 overflow-x-auto rounded-lg bg-white/5 p-4 text-xs leading-6 text-slate-100">
-{JSON.stringify(payload, null, 2)}
-                </pre>
+              <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div className="text-sm font-semibold text-slate-950">Execution preview</div>
+                <div className="mt-3 grid gap-3 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-4">
+                  <div>
+                    <div className="text-xs uppercase text-slate-400">Tickers</div>
+                    <div className="mt-1 font-medium text-slate-900">
+                      {payload.tickers.length ? payload.tickers.join(", ") : "Loading universe"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase text-slate-400">Horizon</div>
+                    <div className="mt-1 font-medium text-slate-900">{horizonDays === 252 ? "1 year" : `${horizonDays} days`}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase text-slate-400">Confidence</div>
+                    <div className="mt-1 font-medium text-slate-900">{Math.round(confidenceLevel * 100)}%</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase text-slate-400">Scenario</div>
+                    <div className="mt-1 font-medium text-slate-900">{selectedScenario.label}</div>
+                  </div>
+                </div>
               </div>
             </section>
           </div>

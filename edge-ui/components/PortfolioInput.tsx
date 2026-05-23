@@ -33,13 +33,13 @@ function TickerWeightSlider({
   }, [draftWeight, onChange, ticker]);
 
   return (
-    <div className="rounded-lg border border-slate-200/80 bg-white p-4 shadow-sm">
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-sm font-semibold text-slate-950">{ticker}</div>
           <div className="text-xs text-slate-500">Weight allocation</div>
         </div>
-        <div className="rounded-md bg-slate-950 px-3 py-1 text-xs font-medium text-white">
+        <div className="rounded-md bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-800">
           {formatPercent(weight)}
         </div>
       </div>
@@ -62,14 +62,16 @@ function TickerWeightSlider({
         <span>100%</span>
       </div>
 
-      <button
-        type="button"
-        className="mt-4 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-        onClick={() => onRemove(ticker)}
-        disabled={disableRemove}
-      >
-        Remove
-      </button>
+      <div className="mt-4 flex justify-end">
+        <button
+          type="button"
+          className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => onRemove(ticker)}
+          disabled={disableRemove}
+        >
+          Remove
+        </button>
+      </div>
     </div>
   );
 }
@@ -97,7 +99,7 @@ export default function PortfolioInput({
     pendingTicker && availableTickers.includes(pendingTicker) ? pendingTicker : (availableTickers[0] ?? "");
 
   return (
-    <section className="rounded-lg border border-white/60 bg-white p-6">
+    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase text-teal-800/70">Portfolio</p>
@@ -107,15 +109,15 @@ export default function PortfolioInput({
           </p>
         </div>
 
-        <div className="rounded-lg border border-slate-200 bg-slate-950 px-4 py-3 text-slate-100">
-          <div className="text-xs uppercase text-slate-400">Selections</div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900">
+          <div className="text-xs uppercase text-slate-500">Selections</div>
           <div className="mt-1 text-lg font-semibold">
             {selections.length}/{maxPortfolioTickers}
           </div>
         </div>
       </div>
 
-      <div className="mt-6 flex flex-col gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 sm:flex-row sm:items-center">
+      <div className="mt-6 flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-end">
         <label className="flex-1">
           <span className="mb-2 block text-sm font-medium text-slate-700">Add supported ticker</span>
           <select
@@ -158,10 +160,10 @@ export default function PortfolioInput({
         </button>
       </div>
 
-      <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+      <div className="mt-6 grid gap-3 sm:grid-cols-2">
         {selections.map((selection) => (
           <TickerWeightSlider
-            key={`${selection.ticker}-${selection.weight.toFixed(2)}`}
+            key={selection.ticker}
             ticker={selection.ticker}
             weight={selection.weight}
             onChange={setWeight}

@@ -24,7 +24,7 @@ function uniqueTickers(tickers: SupportedTicker[]) {
 }
 
 function fallbackSelections(tickers: SupportedTicker[]) {
-  return tickers.length > 0 ? evenlySplitSelections([tickers[0]]) : [];
+  return tickers.length > 0 ? evenlySplitSelections(tickers.slice(0, 5)) : [];
 }
 
 function keepSupportedSelections(

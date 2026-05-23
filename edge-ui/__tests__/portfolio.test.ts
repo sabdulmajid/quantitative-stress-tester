@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildRunExport, runExportFilename } from '../lib/export';
+import { buildRunExport, buildRunExportCsv, runExportCsvFilename, runExportFilename } from '../lib/export';
 import { clampWeight, roundWeight, normalizeSelections, addTickerToSelections } from '../lib/portfolio';
 import type { StressTestRequest, StressTestResponse } from '../lib/types';
 
@@ -93,6 +93,8 @@ describe('portfolio util functions', () => {
     expect(exported.risk_metrics.cvar).toBe(0.22);
     expect(exported.risk_contributions[0].ticker).toBe('AAPL');
     expect(exported.timings_ms.gateway_roundtrip).toBe(128);
+    expect(buildRunExportCsv(exported)).toContain('"inputs","covariance_matrix"');
+    expect(runExportCsvFilename('2026-05-22T00:00:00.000Z')).toBe('quant-stress-run-2026-05-22T00-00-00-000Z.csv');
     expect(runExportFilename('2026-05-22T00:00:00.000Z')).toBe('quant-stress-run-2026-05-22T00-00-00-000Z.json');
   });
 });

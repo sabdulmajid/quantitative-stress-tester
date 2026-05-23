@@ -14,3 +14,12 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Quant Stress Engine", version="0.1.0", lifespan=lifespan)
 app.include_router(router)
+
+
+@app.get("/")
+def root() -> dict[str, object]:
+    return {
+        "service": "quant-stress-compute",
+        "status": "ok",
+        "routes": ["GET /health", "POST /simulate"],
+    }

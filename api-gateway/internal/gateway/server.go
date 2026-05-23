@@ -253,11 +253,34 @@ func New(cfg Config) *Server {
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/api/v1/supported-tickers", s.handleSupportedTickers)
 	mux.HandleFunc("/api/v1/stress-test", s.handleStressTest)
 	mux.Handle("/metrics", promhttp.Handler())
 	return corsMiddleware(loggingMiddleware(s.logger, metricsMiddleware(mux)))
+}
+
+func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"service": "quant-stress-gateway",
+		"status":  "ok",
+		"routes": []string{
+			"GET /health",
+			"GET /api/v1/supported-tickers",
+			"POST /api/v1/stress-test",
+			"GET /metrics",
+		},
+	})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -757,7 +780,7 @@ func (r *statusRecorder) Write(payload []byte) (int, error) {
 
 func normalizeMetricRoute(path string) string {
 	switch path {
-	case "/health", "/metrics", "/api/v1/supported-tickers", "/api/v1/stress-test":
+	case "/", "/health", "/metrics", "/api/v1/supported-tickers", "/api/v1/stress-test":
 		return path
 	default:
 		return "other"
