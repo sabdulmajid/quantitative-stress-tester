@@ -24,7 +24,7 @@
   - Build a highly concurrent native controller on port `8080`.
   - Receive standard HTTP requests from the frontend.
   - Fetch real historical price data for the `22` supported symbols exposed by `GET /api/v1/supported-tickers`.
-  - Use Redis for shared market-data caching when configured, with an in-memory fallback for local and degraded operation.
+  - Use Render Key Value or another Redis-compatible cache for shared market-data caching when configured, with an in-memory fallback for local and degraded operation.
   - Derive annualized `mu` and covariance `Sigma` from aligned daily log returns.
   - Extract the relevant subvector and submatrix for up to `20` requested tickers.
   - Apply gateway-owned macroeconomic scenario shocks to drift and covariance before fixed-shape padding.

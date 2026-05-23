@@ -81,35 +81,40 @@ A `wrk -t4 -c16 -d20s` run pushed the local CPU-bound compute path to the gatewa
 
 ## Production Verification
 
-Date: 2026-05-22
+Date: 2026-05-23
 
-Host: Render production services using the public UI, gateway, and compute endpoints with Redis-backed gateway caching and Supabase-authenticated history persistence enabled.
+Host: Render production gateway endpoint. The run did not use privileged Render API access, so it could not force an idle cold start or verify backend logs. The first request is therefore a current-state first request, not a true redeploy or idle cold-start sample.
 
 Payload: 20 tickers, equal weights, `100000` Monte Carlo paths, `252` day horizon, `0.99` confidence, `0.02` risk-free rate, `financial_crisis_2008` scenario, seed `42`.
 
-Authenticated smoke result:
+Current first request:
 
-```json
-{
-  "warmup_http_ms": 749.70,
-  "warm_http_ms": 394.52,
-  "warm_compute_ms": 117.05,
-  "data_fetch_ms": 126.52,
-  "total_roundtrip_ms": 284.28,
-  "authenticated_ui_flow": "verified",
-  "ticker_count": 20,
-  "histogram_bins": 50
-}
-```
+| Client RTT | Gateway processing | Market data fetch | JAX compute | Histogram bins | Risk contributions |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| `670.57 ms` | `439.47 ms` | `82.07 ms` | `116.10 ms` | `50` | `20` |
 
-Five-run live profile:
+Ten-run warm live profile:
 
 | Run | Client RTT | Gateway processing | Market data fetch | JAX compute |
 | ---: | ---: | ---: | ---: | ---: |
-| 1 | `401.02 ms` | `294.05 ms` | `41.47 ms` | `218.07 ms` |
-| 2 | `305.22 ms` | `190.37 ms` | `35.62 ms` | `123.55 ms` |
-| 3 | `308.23 ms` | `202.94 ms` | `36.05 ms` | `128.99 ms` |
-| 4 | `391.55 ms` | `269.56 ms` | `107.54 ms` | `134.82 ms` |
-| 5 | `597.50 ms` | `367.50 ms` | `202.63 ms` | `127.79 ms` |
+| 1 | `507.20 ms` | `269.78 ms` | `100.08 ms` | `141.41 ms` |
+| 2 | `500.63 ms` | `379.35 ms` | `200.91 ms` | `151.68 ms` |
+| 3 | `496.84 ms` | `353.23 ms` | `78.01 ms` | `247.72 ms` |
+| 4 | `496.02 ms` | `353.95 ms` | `85.92 ms` | `239.04 ms` |
+| 5 | `599.38 ms` | `474.87 ms` | `200.89 ms` | `233.60 ms` |
+| 6 | `633.09 ms` | `506.67 ms` | `201.84 ms` | `244.69 ms` |
+| 7 | `571.29 ms` | `441.27 ms` | `186.88 ms` | `229.00 ms` |
+| 8 | `494.31 ms` | `368.02 ms` | `97.99 ms` | `242.92 ms` |
+| 9 | `401.50 ms` | `289.61 ms` | `29.99 ms` | `151.28 ms` |
+| 10 | `497.33 ms` | `352.13 ms` | `90.63 ms` | `234.78 ms` |
 
-Production averages: client RTT `400.70 ms`, gateway processing `264.88 ms`, market data fetch `84.66 ms`, JAX compute `146.64 ms`. Maximum observed JAX compute latency was `218.07 ms`.
+Warm-path small-sample estimates from 10 sequential requests:
+
+| Metric | p50 | p95 estimate | p99 estimate | Mean | Min | Max |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Client RTT | `498.98 ms` | `617.92 ms` | `630.06 ms` | `519.76 ms` | `401.50 ms` | `633.09 ms` |
+| Gateway processing | `360.99 ms` | `492.36 ms` | `503.81 ms` | `378.89 ms` | `269.78 ms` | `506.67 ms` |
+| Market data fetch | `99.03 ms` | `201.42 ms` | `201.76 ms` | `127.31 ms` | `29.99 ms` | `201.84 ms` |
+| JAX compute | `234.19 ms` | `246.36 ms` | `247.45 ms` | `211.61 ms` | `141.41 ms` | `247.72 ms` |
+
+Cache behavior is inferred from gateway telemetry only. Market-data fetch time remained below `202 ms` for all warm requests, which is consistent with cached or otherwise warmed data, but Redis/Key Value usage must be confirmed from Render logs or service metrics with rotated admin credentials.

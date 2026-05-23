@@ -18,7 +18,8 @@ lint:
 
 build:
 	cd compute-engine && python -m compileall app
-	cd api-gateway && go build ./cmd/api-gateway
+	mkdir -p bin
+	cd api-gateway && go build -o ../bin/api-gateway ./cmd/api-gateway
 	cd edge-ui && npm run build
 
 integration:

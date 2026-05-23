@@ -8,7 +8,7 @@ Institutional risk systems are judged by how well they coordinate data freshness
 
 - A Go gateway coordinates concurrent historical data pulls, cache reuse, rate-limit fallback, annualized moment construction, scenario shocks, and compute proxying.
 - The compute engine keeps tensor shapes static at `50` assets, `100000` Monte Carlo paths, and `50` histogram bins so JAX/XLA compiles the exact production path during startup.
-- The Next.js BFF protects private services from the browser, supports Supabase cookie authentication, and still runs the core stress workflow in guest mode when Supabase is absent.
+- The Next.js BFF keeps service wiring out of browser code, supports Supabase cookie authentication, and still runs the core stress workflow in guest mode when Supabase is absent.
 - The UI exposes operator-grade risk outputs: VaR, CVaR, Sharpe ratio, annualized volatility, covariance/correlation matrices, scenario stress, per-asset volatility contribution, and structured JSON export.
 
 ## System Topology
@@ -29,7 +29,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | Compute | `compute-engine/` | FastAPI, JAX, XLA | Validates the fixed padded payload, runs the GBM Monte Carlo kernel, returns risk metrics and exactly `50` histogram bins. |
 | Gateway | `api-gateway/` | Go | Fetches and caches market data, derives annualized `mu` and `Sigma`, applies scenario shocks, pads the compute payload, computes risk attribution, and exposes Prometheus metrics. |
-| UI and BFF | `edge-ui/` | Next.js App Router, TypeScript, Tailwind | Discovers gateway capabilities, manages portfolios, proxies private gateway calls, handles optional Supabase SSR auth, renders analytics, and exports runs. |
+| UI and BFF | `edge-ui/` | Next.js App Router, TypeScript, Tailwind | Discovers gateway capabilities, manages portfolios, proxies gateway calls server-side, handles optional Supabase SSR auth, renders analytics, and exports runs. |
 | Persistence | `supabase/` | Postgres, RLS | Stores saved portfolios, authenticated run history, scenario metadata, and risk attribution JSON. |
 | Cache | Render Key Value or local Redis-compatible cache | Redis-compatible protocol | Shares historical price series across gateway instances with in-memory fallback when no cache URL is configured. |
 
@@ -57,8 +57,8 @@ The gateway may enrich the request with scenario shocks and risk attribution, bu
 | Gateway | `GET` | `/metrics` | Prometheus counters and histograms for HTTP, data-fetch, compute, and round-trip timing. |
 | Gateway | `GET` | `/api/v1/supported-tickers` | Returns provider metadata, cache TTL, max selection count, padded asset count, ticker universe, and supported macro scenarios. |
 | Gateway | `POST` | `/api/v1/stress-test` | Runs market-data enrichment, scenario scaling, JAX simulation, risk attribution, and matrix response assembly. |
-| UI BFF | `GET` | `/api/v1/supported-tickers` | Server-side proxy to the private gateway. |
-| UI BFF | `POST` | `/api/v1/stress-test` | Server-side proxy to the private gateway plus optional authenticated persistence. |
+| UI BFF | `GET` | `/api/v1/supported-tickers` | Server-side proxy to the gateway. |
+| UI BFF | `POST` | `/api/v1/stress-test` | Server-side proxy to the gateway plus optional authenticated persistence. |
 | UI BFF | `GET|POST` | `/api/v1/portfolio` | Authenticated saved portfolio read/write when Supabase is configured. |
 | UI BFF | `GET` | `/api/v1/history` | Authenticated recent stress-run history. |
 
@@ -95,7 +95,7 @@ Gateway responses include `expected_return`, `var_95`, `var_99`, selected `value
 | Gateway | `MARKET_DATA_FETCH_MAX_WAIT` | `320ms` | No | Upper jitter bound between cold market-data requests. |
 | Gateway | `REDIS_URL` | empty | No | Redis-compatible Render Key Value connection string; gateway falls back to in-memory cache if absent. |
 | UI | `PORT` | `3000` | No | Next.js standalone server port. |
-| UI | `API_GATEWAY_INTERNAL_URL` | `http://localhost:8080` | Yes in deployment | Private gateway endpoint used by BFF routes. |
+| UI | `API_GATEWAY_INTERNAL_URL` | `http://localhost:8080` | Yes in deployment | Gateway endpoint used by BFF routes. |
 | UI | `NEXT_PUBLIC_SUPABASE_URL` | empty | No | Enables Supabase auth and persistence when paired with a publishable key. |
 | UI | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | empty | No | Supabase browser and SSR publishable key. |
 
@@ -112,15 +112,16 @@ Benchmarks are from [BENCHMARK.md](BENCHMARK.md) on a local Linux CPU environmen
 
 ## Production Verification
 
-The current Render deployment was verified against the live 20-ticker, `100000` path, `252` day, `0.99` confidence payload with Supabase-backed authenticated history enabled.
+The latest public Render benchmark was captured on 2026-05-23 through the deployed gateway with the live 20-ticker, `100000` path, `252` day, `0.99` confidence payload. A forced cold start was not available without Render admin credentials, so the first row is labeled as the current first request rather than a true idle cold start.
 
 | Profile | Client RTT | Gateway processing | Market data fetch | JAX compute |
 | --- | ---: | ---: | ---: | ---: |
-| Authenticated smoke warm request | `394.52 ms` | `284.28 ms` | `126.52 ms` | `117.05 ms` |
-| Five-run production average | `400.70 ms` | `264.88 ms` | `84.66 ms` | `146.64 ms` |
-| Five-run production maximum | `597.50 ms` | `367.50 ms` | `202.63 ms` | `218.07 ms` |
+| Current first request | `670.57 ms` | `439.47 ms` | `82.07 ms` | `116.10 ms` |
+| Warm p50, 10 requests | `498.98 ms` | `360.99 ms` | `99.03 ms` | `234.19 ms` |
+| Warm p95 estimate, 10 requests | `617.92 ms` | `492.36 ms` | `201.42 ms` | `246.36 ms` |
+| Warm p99 estimate, 10 requests | `630.06 ms` | `503.81 ms` | `201.76 ms` | `247.45 ms` |
 
-The smoke check confirmed `50` histogram bins, `20` requested tickers, successful Supabase-authenticated history persistence, and sub-second warm JAX execution on the full `50`-asset padded contract.
+The public guest-mode smoke check confirmed `50` histogram bins, `20` requested tickers, `20` risk-contribution rows, scenario metadata, covariance output, and sub-second warm JAX execution on the full `50`-asset padded contract. Authenticated Supabase verification requires rotated runtime credentials and should be run before claiming identity-provider readiness.
 
 ## Local Development
 
@@ -167,7 +168,7 @@ python scripts/integration_smoke.py
 | `quant-stress-compute` | `https://quant-stress-compute.onrender.com` | Docker, FastAPI/JAX | Fixed-shape simulation worker with startup warmup. |
 | `quant-stress-redis` | Internal Render Key Value endpoint | Render Key Value | Shared historical price-series cache. |
 
-The UI is intentionally deployed as a Node server rather than a static export so BFF routes, private gateway proxying, and Supabase cookie authentication run natively.
+The UI is intentionally deployed as a Node server rather than a static export so BFF routes, gateway proxying, and Supabase cookie authentication run natively.
 
 ## Supabase Setup
 
