@@ -110,6 +110,18 @@ Benchmarks are from [BENCHMARK.md](BENCHMARK.md) on a local Linux CPU environmen
 | Python p95/p99 harness | `120` requests, `4` workers, warmed 20-ticker payload | `10.06 req/s`, p50 `391.58 ms`, p95 `470.28 ms`, p99 `570.07 ms`, zero errors. |
 | CPU saturation note | `wrk -t4 -c16 -d20s` | Throughput stayed near `10.16 req/s`; p99 reached `1.98 s` and the client reported timeout pressure with a `2 s` timeout. |
 
+## Production Verification
+
+The current Render deployment was verified against the live 20-ticker, `100000` path, `252` day, `0.99` confidence payload with Supabase-backed authenticated history enabled.
+
+| Profile | Client RTT | Gateway processing | Market data fetch | JAX compute |
+| --- | ---: | ---: | ---: | ---: |
+| Authenticated smoke warm request | `394.52 ms` | `284.28 ms` | `126.52 ms` | `117.05 ms` |
+| Five-run production average | `400.70 ms` | `264.88 ms` | `84.66 ms` | `146.64 ms` |
+| Five-run production maximum | `597.50 ms` | `367.50 ms` | `202.63 ms` | `218.07 ms` |
+
+The smoke check confirmed `50` histogram bins, `20` requested tickers, successful Supabase-authenticated history persistence, and sub-second warm JAX execution on the full `50`-asset padded contract.
+
 ## Local Development
 
 ```bash
@@ -148,12 +160,12 @@ python scripts/integration_smoke.py
 
 [render.yaml](render.yaml) is the deployment source of truth. It defines:
 
-| Render resource | Visibility | Runtime | Notes |
+| Render resource | Current public endpoint | Runtime | Notes |
 | --- | --- | --- | --- |
-| `quant-stress-ui` | Public web service | Docker, Next.js standalone server | Browser entry point and BFF. It reaches the gateway through Render private networking. |
-| `quant-stress-gateway` | Private service | Docker, Go static binary | Market-data orchestration, Redis cache integration, compute proxy, and Prometheus metrics. |
-| `quant-stress-compute` | Private service | Docker, FastAPI/JAX | Fixed-shape simulation worker with startup warmup. |
-| `quant-stress-redis` | Private Redis | Render Redis | Shared historical price-series cache. |
+| `quant-stress-ui` | `https://quant-stress-ui.onrender.com` | Docker, Next.js standalone server | Browser entry point and BFF. It proxies gateway calls server-side. |
+| `quant-stress-gateway` | `https://quant-stress-gateway.onrender.com` | Docker, Go static binary | Market-data orchestration, Redis cache integration, compute proxy, and Prometheus metrics. |
+| `quant-stress-compute` | `https://quant-stress-compute.onrender.com` | Docker, FastAPI/JAX | Fixed-shape simulation worker with startup warmup. |
+| `quant-stress-redis` | Internal Render Redis endpoint | Render Redis | Shared historical price-series cache. |
 
 The UI is intentionally deployed as a Node server rather than a static export so BFF routes, private gateway proxying, and Supabase cookie authentication run natively.
 

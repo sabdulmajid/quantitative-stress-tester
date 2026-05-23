@@ -37,10 +37,12 @@ Result:
 Command:
 
 ```bash
-/tmp/wrk/wrk -t2 -c4 -d20s --timeout 10s --latency \
-  -s /tmp/quant_stress_post.lua \
+wrk -t2 -c4 -d20s --timeout 10s --latency \
+  -s scripts/wrk_stress_post.lua \
   http://127.0.0.1:8080/api/v1/stress-test
 ```
+
+The relative script path points to the committed `wrk` POST payload helper used for reproducible local load testing.
 
 Result:
 
@@ -76,3 +78,38 @@ Errors: 0
 ## Stress Note
 
 A `wrk -t4 -c16 -d20s` run pushed the local CPU-bound compute path to the gateway timeout edge: throughput stayed near `10.16 req/s`, p99 was `1.98s`, and `wrk` reported 15 client-side timeouts with its default 2 second timeout. The c4 run above is the stable local benchmark profile for this CPU environment.
+
+## Production Verification
+
+Date: 2026-05-22
+
+Host: Render production services using the public UI, gateway, and compute endpoints with Redis-backed gateway caching and Supabase-authenticated history persistence enabled.
+
+Payload: 20 tickers, equal weights, `100000` Monte Carlo paths, `252` day horizon, `0.99` confidence, `0.02` risk-free rate, `financial_crisis_2008` scenario, seed `42`.
+
+Authenticated smoke result:
+
+```json
+{
+  "warmup_http_ms": 749.70,
+  "warm_http_ms": 394.52,
+  "warm_compute_ms": 117.05,
+  "data_fetch_ms": 126.52,
+  "total_roundtrip_ms": 284.28,
+  "authenticated_ui_flow": "verified",
+  "ticker_count": 20,
+  "histogram_bins": 50
+}
+```
+
+Five-run live profile:
+
+| Run | Client RTT | Gateway processing | Market data fetch | JAX compute |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | `401.02 ms` | `294.05 ms` | `41.47 ms` | `218.07 ms` |
+| 2 | `305.22 ms` | `190.37 ms` | `35.62 ms` | `123.55 ms` |
+| 3 | `308.23 ms` | `202.94 ms` | `36.05 ms` | `128.99 ms` |
+| 4 | `391.55 ms` | `269.56 ms` | `107.54 ms` | `134.82 ms` |
+| 5 | `597.50 ms` | `367.50 ms` | `202.63 ms` | `127.79 ms` |
+
+Production averages: client RTT `400.70 ms`, gateway processing `264.88 ms`, market data fetch `84.66 ms`, JAX compute `146.64 ms`. Maximum observed JAX compute latency was `218.07 ms`.
