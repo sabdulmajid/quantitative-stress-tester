@@ -1,15 +1,15 @@
 services:
-  - type: redis
+  - type: keyvalue
     name: quant-stress-redis
-    plan: starter
+    plan: free
     region: oregon
     maxmemoryPolicy: allkeys-lru
     ipAllowList: []
 
-  - type: pserv
+  - type: web
     runtime: docker
     name: quant-stress-compute
-    plan: starter
+    plan: free
     region: oregon
     dockerfilePath: ./compute-engine/Dockerfile
     dockerContext: ./compute-engine
@@ -23,10 +23,10 @@ services:
       paths:
         - compute-engine/**
 
-  - type: pserv
+  - type: web
     runtime: docker
     name: quant-stress-gateway
-    plan: starter
+    plan: free
     region: oregon
     dockerfilePath: ./api-gateway/Dockerfile
     dockerContext: ./api-gateway
@@ -50,12 +50,12 @@ services:
         value: 320ms
       - key: REDIS_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: quant-stress-redis
           property: connectionString
       - key: COMPUTE_ENGINE_URL
         fromService:
-          type: pserv
+          type: web
           name: quant-stress-compute
           property: hostport
     buildFilter:
@@ -65,7 +65,7 @@ services:
   - type: web
     runtime: docker
     name: quant-stress-ui
-    plan: starter
+    plan: free
     region: oregon
     dockerfilePath: ./edge-ui/Dockerfile
     dockerContext: ./edge-ui
@@ -79,7 +79,7 @@ services:
         value: "1"
       - key: API_GATEWAY_INTERNAL_URL
         fromService:
-          type: pserv
+          type: web
           name: quant-stress-gateway
           property: hostport
       - key: NEXT_PUBLIC_SUPABASE_URL

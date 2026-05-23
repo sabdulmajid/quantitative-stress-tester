@@ -1,6 +1,6 @@
 # Quant Stress Engine
 
-Quant Stress Engine is a production-oriented portfolio risk platform built around a fixed-shape Monte Carlo execution contract. It combines a FastAPI/JAX compute worker, a concurrent Go market-data gateway, a Next.js BFF and operator UI, Redis-backed price caching, and optional Supabase persistence for portfolios and run history.
+Quant Stress Engine is a production-oriented portfolio risk platform built around a fixed-shape Monte Carlo execution contract. It combines a FastAPI/JAX compute worker, a concurrent Go market-data gateway, a Next.js BFF and operator UI, Render Key Value price caching, and optional Supabase persistence for portfolios and run history.
 
 ## Why This Project Matters
 
@@ -17,7 +17,7 @@ Institutional risk systems are judged by how well they coordinate data freshness
 flowchart LR
   Browser[Browser] --> UI[Next.js Edge UI<br/>BFF Routes + Supabase SSR]
   UI --> Gateway[Go API Gateway<br/>slog + Prometheus]
-  Gateway --> Redis[(Redis<br/>market data cache)]
+  Gateway --> Redis[(Render Key Value<br/>market data cache)]
   Gateway --> Yahoo[Yahoo Finance<br/>historical prices]
   Gateway --> Compute[FastAPI Compute Engine<br/>JAX/XLA GBM]
   UI --> Supabase[(Supabase Postgres<br/>portfolio + run history)]
@@ -31,7 +31,7 @@ flowchart LR
 | Gateway | `api-gateway/` | Go | Fetches and caches market data, derives annualized `mu` and `Sigma`, applies scenario shocks, pads the compute payload, computes risk attribution, and exposes Prometheus metrics. |
 | UI and BFF | `edge-ui/` | Next.js App Router, TypeScript, Tailwind | Discovers gateway capabilities, manages portfolios, proxies private gateway calls, handles optional Supabase SSR auth, renders analytics, and exports runs. |
 | Persistence | `supabase/` | Postgres, RLS | Stores saved portfolios, authenticated run history, scenario metadata, and risk attribution JSON. |
-| Cache | Render Redis or local Redis | Redis | Shares historical price series across gateway instances with in-memory fallback when Redis is unavailable. |
+| Cache | Render Key Value or local Redis-compatible cache | Redis-compatible protocol | Shares historical price series across gateway instances with in-memory fallback when no cache URL is configured. |
 
 ## Execution Contract
 
@@ -93,7 +93,7 @@ Gateway responses include `expected_return`, `var_95`, `var_99`, selected `value
 | Gateway | `MARKET_DATA_FETCH_WORKERS` | `2` | No | Concurrent fetch worker count. |
 | Gateway | `MARKET_DATA_FETCH_MIN_WAIT` | `120ms` | No | Lower jitter bound between cold market-data requests. |
 | Gateway | `MARKET_DATA_FETCH_MAX_WAIT` | `320ms` | No | Upper jitter bound between cold market-data requests. |
-| Gateway | `REDIS_URL` | empty | No | Redis connection string; gateway falls back to in-memory cache if absent. |
+| Gateway | `REDIS_URL` | empty | No | Redis-compatible Render Key Value connection string; gateway falls back to in-memory cache if absent. |
 | UI | `PORT` | `3000` | No | Next.js standalone server port. |
 | UI | `API_GATEWAY_INTERNAL_URL` | `http://localhost:8080` | Yes in deployment | Private gateway endpoint used by BFF routes. |
 | UI | `NEXT_PUBLIC_SUPABASE_URL` | empty | No | Enables Supabase auth and persistence when paired with a publishable key. |
@@ -163,9 +163,9 @@ python scripts/integration_smoke.py
 | Render resource | Current public endpoint | Runtime | Notes |
 | --- | --- | --- | --- |
 | `quant-stress-ui` | `https://quant-stress-ui.onrender.com` | Docker, Next.js standalone server | Browser entry point and BFF. It proxies gateway calls server-side. |
-| `quant-stress-gateway` | `https://quant-stress-gateway.onrender.com` | Docker, Go static binary | Market-data orchestration, Redis cache integration, compute proxy, and Prometheus metrics. |
+| `quant-stress-gateway` | `https://quant-stress-gateway.onrender.com` | Docker, Go static binary | Market-data orchestration, Render Key Value cache integration, compute proxy, and Prometheus metrics. |
 | `quant-stress-compute` | `https://quant-stress-compute.onrender.com` | Docker, FastAPI/JAX | Fixed-shape simulation worker with startup warmup. |
-| `quant-stress-redis` | Internal Render Redis endpoint | Render Redis | Shared historical price-series cache. |
+| `quant-stress-redis` | Internal Render Key Value endpoint | Render Key Value | Shared historical price-series cache. |
 
 The UI is intentionally deployed as a Node server rather than a static export so BFF routes, private gateway proxying, and Supabase cookie authentication run natively.
 
