@@ -116,10 +116,10 @@ The latest public Render benchmark was captured on 2026-05-23 through the deploy
 
 | Profile | Client RTT | Gateway processing | Market data fetch | JAX compute |
 | --- | ---: | ---: | ---: | ---: |
-| Current first request | `670.57 ms` | `439.47 ms` | `82.07 ms` | `116.10 ms` |
-| Warm p50, 10 requests | `498.98 ms` | `360.99 ms` | `99.03 ms` | `234.19 ms` |
-| Warm p95 estimate, 10 requests | `617.92 ms` | `492.36 ms` | `201.42 ms` | `246.36 ms` |
-| Warm p99 estimate, 10 requests | `630.06 ms` | `503.81 ms` | `201.76 ms` | `247.45 ms` |
+| Current first request | `504.21 ms` | `276.57 ms` | `110.48 ms` | `137.33 ms` |
+| Warm p50, 10 requests | `400.39 ms` | `288.97 ms` | `117.86 ms` | `143.69 ms` |
+| Warm p95 estimate, 10 requests | `544.64 ms` | `369.14 ms` | `154.49 ms` | `196.57 ms` |
+| Warm p99 estimate, 10 requests | `579.66 ms` | `379.39 ms` | `172.74 ms` | `227.62 ms` |
 
 The public guest-mode smoke check confirmed `50` histogram bins, `20` requested tickers, `20` risk-contribution rows, scenario metadata, covariance output, and sub-second warm JAX execution on the full `50`-asset padded contract. Authenticated Supabase verification requires rotated runtime credentials and should be run before claiming identity-provider readiness.
 

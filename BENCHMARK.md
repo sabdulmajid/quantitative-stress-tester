@@ -91,30 +91,30 @@ Current first request:
 
 | Client RTT | Gateway processing | Market data fetch | JAX compute | Histogram bins | Risk contributions |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| `670.57 ms` | `439.47 ms` | `82.07 ms` | `116.10 ms` | `50` | `20` |
+| `504.21 ms` | `276.57 ms` | `110.48 ms` | `137.33 ms` | `50` | `20` |
 
 Ten-run warm live profile:
 
 | Run | Client RTT | Gateway processing | Market data fetch | JAX compute |
 | ---: | ---: | ---: | ---: | ---: |
-| 1 | `507.20 ms` | `269.78 ms` | `100.08 ms` | `141.41 ms` |
-| 2 | `500.63 ms` | `379.35 ms` | `200.91 ms` | `151.68 ms` |
-| 3 | `496.84 ms` | `353.23 ms` | `78.01 ms` | `247.72 ms` |
-| 4 | `496.02 ms` | `353.95 ms` | `85.92 ms` | `239.04 ms` |
-| 5 | `599.38 ms` | `474.87 ms` | `200.89 ms` | `233.60 ms` |
-| 6 | `633.09 ms` | `506.67 ms` | `201.84 ms` | `244.69 ms` |
-| 7 | `571.29 ms` | `441.27 ms` | `186.88 ms` | `229.00 ms` |
-| 8 | `494.31 ms` | `368.02 ms` | `97.99 ms` | `242.92 ms` |
-| 9 | `401.50 ms` | `289.61 ms` | `29.99 ms` | `151.28 ms` |
-| 10 | `497.33 ms` | `352.13 ms` | `90.63 ms` | `234.78 ms` |
+| 1 | `398.95 ms` | `278.11 ms` | `107.70 ms` | `142.39 ms` |
+| 2 | `396.30 ms` | `289.44 ms` | `126.62 ms` | `135.44 ms` |
+| 3 | `400.83 ms` | `291.85 ms` | `118.34 ms` | `146.45 ms` |
+| 4 | `395.97 ms` | `288.49 ms` | `117.37 ms` | `52.15 ms` |
+| 5 | `407.42 ms` | `286.49 ms` | `109.05 ms` | `149.13 ms` |
+| 6 | `588.41 ms` | `353.48 ms` | `177.30 ms` | `148.93 ms` |
+| 7 | `402.57 ms` | `285.09 ms` | `111.28 ms` | `144.98 ms` |
+| 8 | `396.44 ms` | `271.44 ms` | `106.25 ms` | `137.80 ms` |
+| 9 | `491.15 ms` | `381.95 ms` | `119.39 ms` | `235.38 ms` |
+| 10 | `399.95 ms` | `290.72 ms` | `122.15 ms` | `141.20 ms` |
 
 Warm-path small-sample estimates from 10 sequential requests:
 
 | Metric | p50 | p95 estimate | p99 estimate | Mean | Min | Max |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Client RTT | `498.98 ms` | `617.92 ms` | `630.06 ms` | `519.76 ms` | `401.50 ms` | `633.09 ms` |
-| Gateway processing | `360.99 ms` | `492.36 ms` | `503.81 ms` | `378.89 ms` | `269.78 ms` | `506.67 ms` |
-| Market data fetch | `99.03 ms` | `201.42 ms` | `201.76 ms` | `127.31 ms` | `29.99 ms` | `201.84 ms` |
-| JAX compute | `234.19 ms` | `246.36 ms` | `247.45 ms` | `211.61 ms` | `141.41 ms` | `247.72 ms` |
+| Client RTT | `400.39 ms` | `544.64 ms` | `579.66 ms` | `427.80 ms` | `395.97 ms` | `588.41 ms` |
+| Gateway processing | `288.97 ms` | `369.14 ms` | `379.39 ms` | `301.71 ms` | `271.44 ms` | `381.95 ms` |
+| Market data fetch | `117.86 ms` | `154.49 ms` | `172.74 ms` | `121.55 ms` | `106.25 ms` | `177.30 ms` |
+| JAX compute | `143.69 ms` | `196.57 ms` | `227.62 ms` | `143.38 ms` | `52.15 ms` | `235.38 ms` |
 
-Cache behavior is inferred from gateway telemetry only. Market-data fetch time remained below `202 ms` for all warm requests, which is consistent with cached or otherwise warmed data, but Redis/Key Value usage must be confirmed from Render logs or service metrics with rotated admin credentials.
+Cache behavior is inferred from gateway telemetry only. Market-data fetch time remained below `178 ms` for all warm requests, which is consistent with cached or otherwise warmed data, but Redis/Key Value usage must be confirmed from Render logs or service metrics with rotated admin credentials.
